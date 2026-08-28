@@ -9,6 +9,14 @@
 require_once __DIR__ . '/auth.php';
 session_boot();
 
+// Logout gestito qui, non come action API: la sessione è roba della shell.
+// SameSite=Strict sul cookie mitiga il logout cross-site via GET.
+if (isset($_GET['logout'])) {
+    logout();
+    header('Location: index.php');
+    exit;
+}
+
 $logged = is_logged_in();
 
 $workouts = [];
