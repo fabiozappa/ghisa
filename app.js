@@ -24,6 +24,7 @@ let player = null;
 let wakeLock = null;      // sentinella WakeLock, o null
 let restTimerId = null;   // interval del timer di recupero
 let flushing = false;     // evita flush concorrenti della coda
+let audioCtx = null;      // AudioContext per il beep di fine recupero
 
 // Chiavi localStorage.
 const K_QUEUE = 'GHISA_QUEUE';                 // array di set in attesa di invio
@@ -50,8 +51,9 @@ const els = {
     history:     $('#history-view'),
 };
 
-// La schermata riepilogo la crea app.js (index.php non la prevede).
+// Le schermate riepilogo e fine le crea app.js (index.php non le prevede).
 let summaryView = null;
+let finishView = null;
 
 
 // ===========================================================================
@@ -293,6 +295,7 @@ function showScreen(name) {
     els.playerView.hidden = name !== 'player';
     els.history.hidden = name !== 'history';
     if (summaryView) summaryView.hidden = name !== 'summary';
+    if (finishView) finishView.hidden = name !== 'finish';
 }
 
 
@@ -417,6 +420,7 @@ function buildPlayerSkeleton() {
             <h2 class="p-exercise" id="p-exercise"></h2>
             <div class="p-target" id="p-target"></div>
             <div class="p-set" id="p-set"></div>
+            <div class="p-last" id="p-last" hidden></div>
 
             <label class="p-field">
                 Peso (kg)
@@ -430,6 +434,11 @@ function buildPlayerSkeleton() {
             </label>
 
             <button id="p-next" class="big primary">Avanti</button>
+
+            <div class="p-extra">
+                <button id="p-add-set" class="link" type="button">+ Serie</button>
+                <button id="p-skip" class="link" type="button">Salta esercizio</button>
+            </div>
 
             <div id="p-rest" class="p-rest" hidden>
                 Recupero <span id="p-rest-count"></span>s
@@ -447,7 +456,9 @@ function buildPlayerSkeleton() {
     `;
 
     $('#p-next').addEventListener('click', onNextSet);
-    $('#p-finish').addEventListener('click', () => finishSession(false));
+    $('#p-add-set').addEventListener('click', addExtraSet);
+    $('#p-skip').addEventListener('click', skipExercise);
+    $('#p-finish').addEventListener('click', () => openFinish(false));
     $('#p-cancel').addEventListener('click', cancelSession);
     $('#p-rest-skip').addEventListener('click', stopRest);
 }
@@ -459,13 +470,14 @@ function currentExercise() {
 // Aggiorna i campi con l'esercizio e la serie correnti.
 function renderCurrentSet() {
     const ex = currentExercise();
-    const totalSets = parseInt(ex.target_sets, 10) || 1;
+    const total = setsPlanned(ex);
 
     $('#p-progress').textContent =
         `Esercizio ${player.exIndex + 1} di ${player.exercises.length}`;
     $('#p-exercise').textContent = ex.name;
     $('#p-target').textContent = ex.target ? 'Obiettivo ' + ex.target : '';
-    $('#p-set').textContent = `Serie ${player.setNumber} di ${totalSets}`;
+    $('#p-set').textContent = `Serie ${player.setNumber} di ${total}`;
+    renderLastSets(ex);
 
     // Precompilazione peso: se sto continuando lo stesso esercizio uso l'ultimo
     // peso digitato; altrimenti l'ultimo peso storico dell'esercizio.
@@ -517,6 +529,7 @@ function renderExerciseList() {
 
 // Tap su "Avanti": registra il set in locale, avanza subito, avvia il recupero.
 function onNextSet() {
+    ensureAudio();                 // sblocca l'audio col gesto dell'utente
     const ex = currentExercise();
     const weightRaw = $('#p-weight').value.trim();
     const repsRaw = $('#p-reps').value.trim();
@@ -537,7 +550,7 @@ function onNextSet() {
     flushQueue();
 
     // Avanza lo stato e avvia il recupero.
-    const totalSets = parseInt(ex.target_sets, 10) || 1;
+    const totalSets = setsPlanned(ex);
     const rest = parseInt(ex.rest_seconds, 10) || 0;
 
     if (player.setNumber < totalSets) {
@@ -550,12 +563,58 @@ function onNextSet() {
         player.setNumber = 1;
         player.lastWeight = null;
         if (player.exIndex >= player.exercises.length) {
-            finishSession(true); // era l'ultima serie dell'ultimo esercizio
+            openFinish(true); // era l'ultima serie dell'ultimo esercizio
         } else {
             renderCurrentSet();
             startRest(rest);
         }
     }
+}
+
+// Numero di serie previste per un esercizio: target + eventuali serie extra
+// aggiunte al volo in palestra (feature "+ Serie").
+function setsPlanned(ex) {
+    return (parseInt(ex.target_sets, 10) || 1) + (ex._extra || 0);
+}
+
+// "+ Serie": aggiunge una serie all'esercizio corrente, senza toccare la scheda.
+function addExtraSet() {
+    const ex = currentExercise();
+    ex._extra = (ex._extra || 0) + 1;
+    renderCurrentSet();
+    toast('Serie aggiunta');
+}
+
+// "Salta esercizio": passa al prossimo senza registrare nulla per questo.
+function skipExercise() {
+    player.exIndex += 1;
+    player.setNumber = 1;
+    player.lastWeight = null;
+    if (player.exIndex >= player.exercises.length) {
+        openFinish(true);
+    } else {
+        renderCurrentSet();
+        stopRest();
+    }
+}
+
+// Riferimento "l'ultima volta": serie eseguite l'ultima sessione completata.
+function renderLastSets(ex) {
+    const box = $('#p-last');
+    if (!box) return;
+    const sets = ex.last_sets || [];
+    if (sets.length === 0) {
+        box.hidden = true;
+        box.textContent = '';
+        return;
+    }
+    const parts = sets.map((s) => {
+        const reps = (s.reps_completed === null || s.reps_completed === '')
+            ? '—' : s.reps_completed;
+        return fmtWeight(s.weight_kg) + '×' + reps;
+    });
+    box.textContent = 'Ultima volta: ' + parts.join(', ');
+    box.hidden = false;
 }
 
 
@@ -577,11 +636,51 @@ function startRest(seconds) {
         remaining -= 1;
         if (remaining <= 0) {
             stopRest();
+            restEndCue();
             toast('Recupero finito');
         } else {
             count.textContent = remaining;
         }
     }, 1000);
+}
+
+// Segnale di fine recupero: vibrazione (dove supportata) + beep. In una sala
+// rumorosa col telefono in tasca il solo toast non basta.
+function restEndCue() {
+    if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]);
+    }
+    beep();
+}
+
+// Prepara l'AudioContext. Va chiamata da un gesto utente (tap "Avanti") per
+// aggirare l'autoplay policy; il beep vero arriva più tardi allo scadere.
+function ensureAudio() {
+    if (audioCtx) return;
+    try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+    } catch (e) {
+        audioCtx = null;
+    }
+}
+
+function beep() {
+    if (!audioCtx) return;
+    try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.value = 0.15;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+    } catch (e) {
+        // Audio non disponibile: pazienza, restano vibrazione e toast.
+    }
 }
 
 function stopRest() {
@@ -598,30 +697,71 @@ function stopRest() {
 // Fine allenamento
 // ===========================================================================
 
-// finishSession segna la chiusura come "in sospeso", svuota la coda dei set
-// e, se ci riesce subito, mostra il riepilogo. Offline: si chiude alla
-// riconnessione (maybeFinishPending), l'utente torna comunque alla home.
-async function finishSession(auto) {
+// Apre la schermata di fine: nota rapida opzionale + salva. Tiene vivo il
+// player così, se non hai davvero finito, puoi tornare indietro.
+// `completed` = true quando sono terminate tutte le serie.
+function openFinish(completed) {
     if (!player) return;
+    stopRest();
 
-    if (!auto) {
-        const ok = confirm('Terminare l\'allenamento?');
-        if (!ok) return;
+    if (!finishView) {
+        finishView = document.createElement('section');
+        finishView.id = 'finish-view';
+        finishView.className = 'screen';
+        $('#app-view').appendChild(finishView);
     }
+    finishView.textContent = '';
+
+    const h = document.createElement('h2');
+    h.textContent = 'Fine allenamento';
+    finishView.appendChild(h);
+
+    const label = document.createElement('label');
+    label.className = 'p-field';
+    label.textContent = 'Nota (opzionale)';
+    const ta = document.createElement('textarea');
+    ta.id = 'finish-notes';
+    ta.rows = 3;
+    ta.placeholder = 'Come è andata, dolori, energia…';
+    label.appendChild(ta);
+    finishView.appendChild(label);
+
+    const save = document.createElement('button');
+    save.className = 'big primary';
+    save.textContent = 'Salva e chiudi';
+    save.addEventListener('click', () => doFinish(ta.value.trim()));
+    finishView.appendChild(save);
+
+    if (!completed) {
+        const back = document.createElement('button');
+        back.className = 'link';
+        back.textContent = 'Torna all\'allenamento';
+        back.addEventListener('click', () => showScreen('player'));
+        finishView.appendChild(back);
+    }
+
+    showScreen('finish');
+}
+
+// Salva davvero: segna la chiusura come "in sospeso", svuota la coda e, se ci
+// riesce subito, mostra il riepilogo. Offline: si chiude alla riconnessione
+// (maybeFinishPending), l'utente torna comunque alla home.
+async function doFinish(notes) {
+    if (!player) return;
 
     const workoutLogId = player.workoutLogId;
     const workoutId = player.workoutId;
     releaseWakeLock();
     stopRest();
 
-    savePendingFinish(workoutLogId, '');
+    savePendingFinish(workoutLogId, notes || '');
     await flushQueue(); // prima manda i set
 
     if (queueGetAll().length === 0) {
         try {
             const res = await api('finish_workout', {
                 workout_log_id: workoutLogId,
-                notes: '',
+                notes: notes || '',
             });
             if (res && res.ok) {
                 clearPendingFinish();

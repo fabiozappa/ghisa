@@ -76,6 +76,58 @@ function last_weight(int $user_id, int $exercise_id, string $exercise_name): ?fl
     return $w !== null ? (float) $w : null;
 }
 
+// Serie eseguite l'ULTIMA volta che questo esercizio è stato fatto in una
+// sessione completata. Serve da riferimento in palestra (cosa battere).
+// Come per l'ultimo peso: prima per exercise_id, poi in fallback per nome.
+function last_session_sets(int $user_id, int $exercise_id, string $exercise_name): array
+{
+    // 1) ultimo workout_log completato che contiene questo exercise_id
+    $log_id = db_value(
+        "SELECT el.workout_log_id
+           FROM exercise_logs el
+           JOIN workout_logs wl ON wl.id = el.workout_log_id
+          WHERE wl.user_id = ?
+            AND el.exercise_id = ?
+            AND wl.finished_at IS NOT NULL
+          ORDER BY wl.started_at DESC, wl.id DESC
+          LIMIT 1",
+        [$user_id, $exercise_id]
+    );
+    if ($log_id !== null) {
+        return db_all(
+            "SELECT set_number, weight_kg, reps_completed
+               FROM exercise_logs
+              WHERE workout_log_id = ? AND exercise_id = ?
+              ORDER BY set_number, id",
+            [$log_id, $exercise_id]
+        );
+    }
+
+    // 2) fallback per nome normalizzato
+    $name = strtolower(trim($exercise_name));
+    $log_id = db_value(
+        "SELECT el.workout_log_id
+           FROM exercise_logs el
+           JOIN workout_logs wl ON wl.id = el.workout_log_id
+          WHERE wl.user_id = ?
+            AND LOWER(TRIM(el.exercise_name)) = ?
+            AND wl.finished_at IS NOT NULL
+          ORDER BY wl.started_at DESC, wl.id DESC
+          LIMIT 1",
+        [$user_id, $name]
+    );
+    if ($log_id === null) {
+        return [];
+    }
+    return db_all(
+        "SELECT set_number, weight_kg, reps_completed
+           FROM exercise_logs
+          WHERE workout_log_id = ? AND LOWER(TRIM(exercise_name)) = ?
+          ORDER BY set_number, id",
+        [$log_id, $name]
+    );
+}
+
 // Formatta un peso togliendo gli zeri decimali inutili: 70.00 -> "70kg".
 function fmt_weight($w): string
 {
@@ -172,6 +224,7 @@ try {
             foreach ($exercises as &$ex) {
                 $ex['target'] = build_target($ex['target_sets'], $ex['target_reps']);
                 $ex['last_weight_kg'] = last_weight($user_id, (int) $ex['id'], $ex['name']);
+                $ex['last_sets'] = last_session_sets($user_id, (int) $ex['id'], $ex['name']);
             }
             unset($ex);
 
