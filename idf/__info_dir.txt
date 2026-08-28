@@ -1,4 +1,0 @@
-/**
- * Questo directory contiene tutto il CORE del framework
- * sono contenute le librerie di base, i templete e relativi JS e altre risorse necessarie al funzionamento del software
- */
