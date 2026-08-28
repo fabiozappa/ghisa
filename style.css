@@ -139,6 +139,12 @@ button {
     min-height: 48px;
     text-decoration: underline;
 }
+.link.danger { color: #ff6b6b; }
+
+/* Scheda in home: nome + "giorni fa" su due righe. */
+.wk { display: flex; flex-direction: column; gap: 4px; }
+.wk-name { font-size: 1.15rem; font-weight: 700; }
+.wk-sub { font-size: 0.8rem; font-weight: 400; color: var(--muted); }
 
 /* --- Topbar --------------------------------------------------------------- */
 .topbar {

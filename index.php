@@ -22,7 +22,15 @@ $logged = is_logged_in();
 $workouts = [];
 if ($logged) {
     $workouts = db_all(
-        "SELECT id, name FROM workouts WHERE user_id = ? ORDER BY id",
+        "SELECT w.id, w.name,
+                (SELECT MAX(wl.finished_at)
+                   FROM workout_logs wl
+                  WHERE wl.workout_id = w.id
+                    AND wl.user_id = w.user_id
+                    AND wl.finished_at IS NOT NULL) AS last_finished
+           FROM workouts w
+          WHERE w.user_id = ?
+          ORDER BY w.id",
         [current_user_id()]
     );
 }

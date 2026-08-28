@@ -28,6 +28,7 @@ let flushing = false;     // evita flush concorrenti della coda
 // Chiavi localStorage.
 const K_QUEUE = 'GHISA_QUEUE';                 // array di set in attesa di invio
 const K_PENDING_FINISH = 'GHISA_PENDING_FINISH'; // chiusura sessione differita
+const K_PENDING_CANCEL = 'GHISA_PENDING_CANCEL'; // annullamento sessione differito
 
 
 // ===========================================================================
@@ -75,6 +76,20 @@ function fmtWeight(w) {
     const n = parseFloat(w);
     if (Number.isNaN(n)) return '—';
     return String(parseFloat(n.toFixed(2)));
+}
+
+// Etichetta "quanti giorni fa" dell'ultima sessione completata di una scheda.
+function daysAgoLabel(dt) {
+    if (!dt) return 'mai fatta';
+    const then = new Date(String(dt).replace(' ', 'T'));
+    if (isNaN(then.getTime())) return '';
+    const t0 = new Date(then.getFullYear(), then.getMonth(), then.getDate());
+    const now = new Date();
+    const n0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const days = Math.round((n0 - t0) / 86400000);
+    if (days <= 0) return 'oggi';
+    if (days === 1) return 'ieri';
+    return days + ' giorni fa';
 }
 
 // Avviso effimero in alto.
@@ -183,6 +198,7 @@ async function flushQueue() {
             }
         }
         await maybeFinishPending();
+        await tryCancelPending();
     } finally {
         flushing = false;
     }
@@ -229,6 +245,35 @@ async function maybeFinishPending() {
         }
     } catch (e) {
         // Ancora offline: si riprova al prossimo flush.
+    }
+}
+
+// --- Annullamento sessione differito (per l'offline) ----------------------
+
+function savePendingCancel(workoutLogId) {
+    localStorage.setItem(K_PENDING_CANCEL, String(workoutLogId));
+}
+
+function getPendingCancel() {
+    const v = localStorage.getItem(K_PENDING_CANCEL);
+    return v ? parseInt(v, 10) : null;
+}
+
+function clearPendingCancel() {
+    localStorage.removeItem(K_PENDING_CANCEL);
+}
+
+// Se c'è un annullamento in sospeso, prova a cancellare la sessione sul server.
+async function tryCancelPending() {
+    const id = getPendingCancel();
+    if (!id) return;
+    try {
+        const res = await api('cancel_workout', { workout_log_id: id });
+        if (res && res.ok) {
+            clearPendingCancel();
+        }
+    } catch (e) {
+        // Offline: si riprova al prossimo flush / evento online.
     }
 }
 
@@ -304,8 +349,18 @@ function renderHome() {
 
     workouts.forEach((w) => {
         const btn = document.createElement('button');
-        btn.className = 'big';
-        btn.textContent = w.name;             // textContent: niente XSS
+        btn.className = 'big wk';
+
+        const name = document.createElement('span');
+        name.className = 'wk-name';
+        name.textContent = w.name;            // textContent: niente XSS
+        btn.appendChild(name);
+
+        const sub = document.createElement('span');
+        sub.className = 'wk-sub';
+        sub.textContent = daysAgoLabel(w.last_finished);
+        btn.appendChild(sub);
+
         btn.addEventListener('click', () => startWorkout(w.id));
         els.home.appendChild(btn);
     });
@@ -338,6 +393,7 @@ async function startWorkout(workoutId) {
     const d = res.data;
     player = {
         workoutLogId: d.workout_log_id,
+        workoutId: d.workout.id,
         workoutName: d.workout.name,
         exercises: d.exercises,
         exIndex: 0,
@@ -381,6 +437,7 @@ function buildPlayerSkeleton() {
             </div>
 
             <button id="p-finish" class="link">Termina allenamento</button>
+            <button id="p-cancel" class="link danger">Annulla allenamento</button>
 
             <div class="exlist-wrap">
                 <h3 class="exlist-title">Esercizi della scheda</h3>
@@ -391,6 +448,7 @@ function buildPlayerSkeleton() {
 
     $('#p-next').addEventListener('click', onNextSet);
     $('#p-finish').addEventListener('click', () => finishSession(false));
+    $('#p-cancel').addEventListener('click', cancelSession);
     $('#p-rest-skip').addEventListener('click', stopRest);
 }
 
@@ -552,6 +610,7 @@ async function finishSession(auto) {
     }
 
     const workoutLogId = player.workoutLogId;
+    const workoutId = player.workoutId;
     releaseWakeLock();
     stopRest();
 
@@ -566,6 +625,7 @@ async function finishSession(auto) {
             });
             if (res && res.ok) {
                 clearPendingFinish();
+                markWorkoutDoneNow(workoutId);
                 player = null;
                 showSummary(res.data.summary);
                 return;
@@ -580,6 +640,44 @@ async function finishSession(auto) {
     toast('Sei offline: l\'allenamento verrà chiuso alla riconnessione.');
     renderHome();
     showScreen('home');
+}
+
+// Annulla l'allenamento: non salva nulla. Butta via i set non inviati,
+// cancella la sessione sul server (con retry se offline) e torna alla home.
+async function cancelSession() {
+    if (!player) return;
+    if (!confirm('Annullare l\'allenamento? Non verrà salvato nulla.')) return;
+
+    const workoutLogId = player.workoutLogId;
+
+    // Scarta subito i set di questa sessione ancora in coda.
+    const kept = queueGetAll().filter((s) => s.workout_log_id !== workoutLogId);
+    queueSave(kept);
+
+    clearPendingFinish();               // non deve chiudersi come "finita"
+    savePendingCancel(workoutLogId);    // se offline, si cancella dopo
+
+    releaseWakeLock();
+    stopRest();
+    player = null;
+
+    await tryCancelPending();
+
+    renderHome();
+    showScreen('home');
+    toast('Allenamento annullato.');
+}
+
+// Aggiorna in memoria la data "ultima completata" della scheda appena finita,
+// così il "giorni fa" in home è subito coerente senza ricaricare.
+function markWorkoutDoneNow(workoutId) {
+    if (!window.GHISA || !Array.isArray(window.GHISA.workouts)) return;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} `
+        + `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const w = window.GHISA.workouts.find((x) => Number(x.id) === Number(workoutId));
+    if (w) w.last_finished = stamp;
 }
 
 function showSummary(summary) {

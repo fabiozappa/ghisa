@@ -128,8 +128,18 @@ try {
             }
 
             // Senza CRUD, il client deve sapere quali schede può aprire.
+            // Riporta anche l'ultima sessione COMPLETATA per scheda (per i
+            // "giorni fa" in home): solo finished_at valorizzato.
             $workouts = db_all(
-                "SELECT id, name FROM workouts WHERE user_id = ? ORDER BY id",
+                "SELECT w.id, w.name,
+                        (SELECT MAX(wl.finished_at)
+                           FROM workout_logs wl
+                          WHERE wl.workout_id = w.id
+                            AND wl.user_id = w.user_id
+                            AND wl.finished_at IS NOT NULL) AS last_finished
+                   FROM workouts w
+                  WHERE w.user_id = ?
+                  ORDER BY w.id",
                 [$user_id]
             );
 
@@ -286,6 +296,37 @@ try {
                 'summary'        => $summary,
                 'sets_count'     => count($rows),
             ]);
+            break;
+        }
+
+        // -- cancel_workout: scarta una sessione senza salvare nulla ---------
+        case 'cancel_workout': {
+            $user_id = requireLogin();
+            $workout_log_id = (int) ($_POST['workout_log_id'] ?? 0);
+
+            $log = db_one(
+                "SELECT id FROM workout_logs WHERE id = ? AND user_id = ?",
+                [$workout_log_id, $user_id]
+            );
+            if ($log === null) {
+                respond_err('Sessione non trovata');
+            }
+
+            // Cancellazione FISICA (log + serie): è una sessione che l'utente
+            // dichiara di voler buttare via, non storico da proteggere.
+            db()->beginTransaction();
+            try {
+                db_run("DELETE FROM exercise_logs WHERE workout_log_id = ?",
+                    [$workout_log_id]);
+                db_run("DELETE FROM workout_logs WHERE id = ? AND user_id = ?",
+                    [$workout_log_id, $user_id]);
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+            respond_ok();
             break;
         }
 
