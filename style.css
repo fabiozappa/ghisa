@@ -79,7 +79,8 @@ label {
 }
 
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+input[type="url"] {
     width: 100%;
     min-height: var(--tap);
     padding: 12px 14px;
@@ -196,14 +197,48 @@ button {
     font-variant-numeric: tabular-nums;
 }
 
-/* Controlli "+ Serie" / "Salta esercizio" sotto Avanti. */
+/* Link esplicativo dell'esercizio. */
+.p-url {
+    display: inline-block;
+    margin: 2px 0 10px;
+    color: var(--accent);
+    text-decoration: underline;
+    font-size: 0.95rem;
+    min-height: 32px;
+}
+
+/* Controlli "+ Serie" / "Salta esercizio" / "Alternativa" sotto Avanti. */
 .p-extra {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     gap: 8px;
     margin: 2px 0 6px;
 }
 .p-extra .link { min-height: 44px; }
+
+/* Etichetta "Al posto di …" nella schermata alternativa. */
+.alt-for { color: var(--muted); margin: -6px 0 14px; }
+
+/* Riga sostituzione nella schermata di fine. */
+.sub-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    text-align: left;
+    padding: 12px;
+    background: var(--surface);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    color: #e6e6e6;
+}
+.sub-check {
+    width: 24px;
+    height: 24px;
+    margin-top: 1px;
+    flex: 0 0 auto;
+    accent-color: var(--accent);
+}
 
 /* Textarea (nota di fine allenamento). */
 textarea {

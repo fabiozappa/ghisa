@@ -51,9 +51,10 @@ const els = {
     history:     $('#history-view'),
 };
 
-// Le schermate riepilogo e fine le crea app.js (index.php non le prevede).
+// Le schermate riepilogo, fine e alternative le crea app.js (index.php non le prevede).
 let summaryView = null;
 let finishView = null;
+let altView = null;
 
 
 // ===========================================================================
@@ -296,6 +297,7 @@ function showScreen(name) {
     els.history.hidden = name !== 'history';
     if (summaryView) summaryView.hidden = name !== 'summary';
     if (finishView) finishView.hidden = name !== 'finish';
+    if (altView) altView.hidden = name !== 'alt';
 }
 
 
@@ -419,6 +421,7 @@ function buildPlayerSkeleton() {
             <div class="p-progress" id="p-progress"></div>
             <h2 class="p-exercise" id="p-exercise"></h2>
             <div class="p-target" id="p-target"></div>
+            <a id="p-url" class="p-url" target="_blank" rel="noopener noreferrer" hidden>Vedi esercizio ↗</a>
             <div class="p-set" id="p-set"></div>
             <div class="p-last" id="p-last" hidden></div>
 
@@ -438,6 +441,7 @@ function buildPlayerSkeleton() {
             <div class="p-extra">
                 <button id="p-add-set" class="link" type="button">+ Serie</button>
                 <button id="p-skip" class="link" type="button">Salta esercizio</button>
+                <button id="p-alt" class="link" type="button">Alternativa</button>
             </div>
 
             <div id="p-rest" class="p-rest" hidden>
@@ -458,6 +462,7 @@ function buildPlayerSkeleton() {
     $('#p-next').addEventListener('click', onNextSet);
     $('#p-add-set').addEventListener('click', addExtraSet);
     $('#p-skip').addEventListener('click', skipExercise);
+    $('#p-alt').addEventListener('click', openAlternatives);
     $('#p-finish').addEventListener('click', () => openFinish(false));
     $('#p-cancel').addEventListener('click', cancelSession);
     $('#p-rest-skip').addEventListener('click', stopRest);
@@ -478,6 +483,16 @@ function renderCurrentSet() {
     $('#p-target').textContent = ex.target ? 'Obiettivo ' + ex.target : '';
     $('#p-set').textContent = `Serie ${player.setNumber} di ${total}`;
     renderLastSets(ex);
+
+    // Link esplicativo dell'esercizio, se presente e sicuro (http/https).
+    const urlEl = $('#p-url');
+    if (ex.url && /^https?:\/\//i.test(ex.url)) {
+        urlEl.href = ex.url;
+        urlEl.hidden = false;
+    } else {
+        urlEl.removeAttribute('href');
+        urlEl.hidden = true;
+    }
 
     // Precompilazione peso: se sto continuando lo stesso esercizio uso l'ultimo
     // peso digitato; altrimenti l'ultimo peso storico dell'esercizio.
@@ -617,6 +632,187 @@ function renderLastSets(ex) {
     box.hidden = false;
 }
 
+// --- Alternative -----------------------------------------------------------
+// Il "titolare" dello slot resta il previsto anche dopo una sostituzione a
+// video: le alternative si chiedono sempre per il titolare originale.
+function currentSlotPrimaryId() {
+    const ex = currentExercise();
+    return ex._slotPrimaryId || ex.id;
+}
+function currentSlotPrimaryName() {
+    const ex = currentExercise();
+    return ex._primaryName || ex.name;
+}
+
+function ensureAltView() {
+    if (!altView) {
+        altView = document.createElement('section');
+        altView.id = 'alt-view';
+        altView.className = 'screen';
+        $('#app-view').appendChild(altView);
+    }
+}
+
+// Apre la schermata alternativa per lo slot corrente.
+async function openAlternatives() {
+    const primaryId = currentSlotPrimaryId();
+    const primaryName = currentSlotPrimaryName();
+
+    ensureAltView();
+    renderAltView({ primaryId, primaryName, loading: true });
+    showScreen('alt');
+
+    try {
+        const res = await api('get_alternatives', { exercise_id: primaryId });
+        if (res.ok) {
+            renderAltView({ primaryId, primaryName, alternatives: res.data.alternatives || [] });
+        } else {
+            renderAltView({ primaryId, primaryName, alternatives: [], error: res.error });
+        }
+    } catch (e) {
+        renderAltView({
+            primaryId, primaryName, alternatives: [],
+            error: 'Serve la rete per gestire le alternative.',
+        });
+    }
+}
+
+function renderAltView(state) {
+    altView.textContent = '';
+
+    const h = document.createElement('h2');
+    h.textContent = 'Alternativa';
+    altView.appendChild(h);
+
+    const forLbl = document.createElement('p');
+    forLbl.className = 'alt-for';
+    forLbl.textContent = 'Al posto di ' + state.primaryName;
+    altView.appendChild(forLbl);
+
+    if (state.loading) {
+        const l = document.createElement('p');
+        l.textContent = 'Carico…';
+        altView.appendChild(l);
+        return;
+    }
+
+    if (state.error) {
+        const e = document.createElement('p');
+        e.className = 'error';
+        e.textContent = state.error;
+        altView.appendChild(e);
+    }
+
+    // Alternative già usate per questo slot.
+    const alts = state.alternatives || [];
+    if (alts.length) {
+        const t = document.createElement('h3');
+        t.className = 'exlist-title';
+        t.textContent = 'Già usate';
+        altView.appendChild(t);
+        alts.forEach((a) => {
+            const btn = document.createElement('button');
+            btn.className = 'big wk';
+            const n = document.createElement('span');
+            n.className = 'wk-name';
+            n.textContent = a.name;
+            btn.appendChild(n);
+            const s = document.createElement('span');
+            s.className = 'wk-sub';
+            s.textContent = a.target || '';
+            btn.appendChild(s);
+            btn.addEventListener('click', () => applyAlternative(a));
+            altView.appendChild(btn);
+        });
+    }
+
+    // Form per una nuova alternativa (target precompilato dal corrente).
+    const t2 = document.createElement('h3');
+    t2.className = 'exlist-title';
+    t2.textContent = 'Nuova alternativa';
+    altView.appendChild(t2);
+
+    const curEx = currentExercise();
+    const name = altField('Nome', 'text');
+    const sets = altField('Serie', 'number');
+    const reps = altField('Ripetizioni', 'text');
+    const url = altField('Link (opzionale)', 'url');
+    sets.input.value = curEx.target_sets != null ? curEx.target_sets : '';
+    reps.input.value = curEx.target_reps != null ? curEx.target_reps : '';
+    altView.appendChild(name.label);
+    altView.appendChild(sets.label);
+    altView.appendChild(reps.label);
+    altView.appendChild(url.label);
+
+    const add = document.createElement('button');
+    add.className = 'big primary';
+    add.textContent = 'Usa questa alternativa';
+    add.addEventListener('click', async () => {
+        const nm = name.input.value.trim();
+        if (!nm) { toast('Serve il nome.'); return; }
+        add.disabled = true;
+        try {
+            const res = await api('add_alternative', {
+                primary_exercise_id: state.primaryId,
+                name: nm,
+                target_sets: sets.input.value.trim(),
+                target_reps: reps.input.value.trim(),
+                url: url.input.value.trim(),
+            });
+            if (res.ok) {
+                applyAlternative(res.data.exercise);
+            } else {
+                toast(res.error || 'Errore.');
+                add.disabled = false;
+            }
+        } catch (e) {
+            toast('Serve la rete per aggiungere un\'alternativa.');
+            add.disabled = false;
+        }
+    });
+    altView.appendChild(add);
+
+    const back = document.createElement('button');
+    back.className = 'link';
+    back.textContent = 'Torna all\'allenamento';
+    back.addEventListener('click', () => showScreen('player'));
+    altView.appendChild(back);
+}
+
+// Piccola factory per un campo etichettato.
+function altField(text, type) {
+    const label = document.createElement('label');
+    label.className = 'p-field';
+    label.textContent = text;
+    const input = document.createElement('input');
+    input.type = type === 'number' ? 'number' : (type === 'url' ? 'url' : 'text');
+    if (type === 'number') {
+        input.inputMode = 'numeric';
+        input.min = '0';
+        input.step = '1';
+    }
+    label.appendChild(input);
+    return { label, input };
+}
+
+// Sostituisce a video l'esercizio dello slot con l'alternativa scelta.
+// Il titolare originale resta memorizzato per la scelta di fine allenamento.
+function applyAlternative(alt) {
+    const cur = currentExercise();
+    alt._slotPrimaryId = cur._slotPrimaryId || cur.id;
+    alt._primaryName = cur._primaryName || cur.name;
+    alt._substituted = true;
+
+    player.exercises[player.exIndex] = alt;
+    player.setNumber = 1;
+    player.lastWeight = null;
+
+    stopRest();
+    renderCurrentSet();
+    showScreen('player');
+    toast('Sostituito con ' + alt.name);
+}
+
 
 // ===========================================================================
 // Timer di recupero (scelta A: automatico, con tasto "salta")
@@ -716,6 +912,29 @@ function openFinish(completed) {
     h.textContent = 'Fine allenamento';
     finishView.appendChild(h);
 
+    // Sostituzioni fatte in questa sessione: scegli se renderle definitive.
+    const subs = player.exercises.filter((e) => e._substituted);
+    if (subs.length) {
+        const st = document.createElement('h3');
+        st.className = 'exlist-title';
+        st.textContent = 'Sostituzioni';
+        finishView.appendChild(st);
+
+        subs.forEach((s) => {
+            const row = document.createElement('label');
+            row.className = 'sub-row';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'sub-check';
+            cb.dataset.altId = s.id;
+            row.appendChild(cb);
+            const txt = document.createElement('span');
+            txt.textContent = `Rendi «${s.name}» definitivo al posto di «${s._primaryName}»`;
+            row.appendChild(txt);
+            finishView.appendChild(row);
+        });
+    }
+
     const label = document.createElement('label');
     label.className = 'p-field';
     label.textContent = 'Nota (opzionale)';
@@ -748,6 +967,18 @@ function openFinish(completed) {
 // (maybeFinishPending), l'utente torna comunque alla home.
 async function doFinish(notes) {
     if (!player) return;
+
+    // Promuove le alternative segnate come definitive (richiede rete).
+    if (finishView) {
+        const checks = finishView.querySelectorAll('.sub-check:checked');
+        for (const c of checks) {
+            try {
+                await api('promote_alternative', { alternative_exercise_id: c.dataset.altId });
+            } catch (e) {
+                toast('Sostituzione non salvata (offline).');
+            }
+        }
+    }
 
     const workoutLogId = player.workoutLogId;
     const workoutId = player.workoutId;

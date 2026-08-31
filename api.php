@@ -128,6 +128,24 @@ function last_session_sets(int $user_id, int $exercise_id, string $exercise_name
     );
 }
 
+// Arricchisce una riga esercizio coi dati derivati usati dal player:
+// target composto, ultimo peso e serie dell'ultima volta. Condiviso da
+// get_workout e get_alternatives così un'alternativa si renderizza come un
+// esercizio qualsiasi.
+function enrich_exercise(array $ex, int $user_id): array
+{
+    $ex['target'] = build_target($ex['target_sets'], $ex['target_reps']);
+    $ex['last_weight_kg'] = last_weight($user_id, (int) $ex['id'], $ex['name']);
+    $ex['last_sets'] = last_session_sets($user_id, (int) $ex['id'], $ex['name']);
+    return $ex;
+}
+
+// Valida un URL fornito dall'utente: solo http/https, niente javascript: & co.
+function valid_url(string $url): bool
+{
+    return (bool) preg_match('#^https?://#i', $url);
+}
+
 // Formatta un peso togliendo gli zeri decimali inutili: 70.00 -> "70kg".
 function fmt_weight($w): string
 {
@@ -212,19 +230,17 @@ try {
                 respond_err('Scheda non trovata');
             }
 
-            // Esercizi vivi (soft delete escluso), in ordine di scheda.
+            // Solo i titolari dello slot (alternative escluse), vivi, in ordine.
             $exercises = db_all(
-                "SELECT id, name, type, target_sets, target_reps, rest_seconds, position
+                "SELECT id, name, type, target_sets, target_reps, rest_seconds, url, position
                    FROM exercises
-                  WHERE workout_id = ? AND deleted_at IS NULL
+                  WHERE workout_id = ? AND deleted_at IS NULL AND alternative_of IS NULL
                   ORDER BY position, id",
                 [$workout_id]
             );
 
             foreach ($exercises as &$ex) {
-                $ex['target'] = build_target($ex['target_sets'], $ex['target_reps']);
-                $ex['last_weight_kg'] = last_weight($user_id, (int) $ex['id'], $ex['name']);
-                $ex['last_sets'] = last_session_sets($user_id, (int) $ex['id'], $ex['name']);
+                $ex = enrich_exercise($ex, $user_id);
             }
             unset($ex);
 
@@ -373,6 +389,135 @@ try {
                     [$workout_log_id]);
                 db_run("DELETE FROM workout_logs WHERE id = ? AND user_id = ?",
                     [$workout_log_id, $user_id]);
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+            respond_ok();
+            break;
+        }
+
+        // -- get_alternatives: pool di alternative già usate per uno slot ----
+        case 'get_alternatives': {
+            $user_id = requireLogin();
+            $exercise_id = (int) ($_POST['exercise_id'] ?? 0);
+
+            // Il titolare deve essere dell'utente.
+            $primary = db_one(
+                "SELECT e.id FROM exercises e
+                   JOIN workouts w ON w.id = e.workout_id
+                  WHERE e.id = ? AND w.user_id = ?",
+                [$exercise_id, $user_id]
+            );
+            if ($primary === null) {
+                respond_err('Esercizio non trovato');
+            }
+
+            $alts = db_all(
+                "SELECT id, name, type, target_sets, target_reps, rest_seconds, url, position
+                   FROM exercises
+                  WHERE alternative_of = ? AND deleted_at IS NULL
+                  ORDER BY name",
+                [$exercise_id]
+            );
+            foreach ($alts as &$a) {
+                $a = enrich_exercise($a, $user_id);
+            }
+            unset($a);
+
+            respond_ok(['alternatives' => $alts]);
+            break;
+        }
+
+        // -- add_alternative: crea un'alternativa per uno slot ---------------
+        case 'add_alternative': {
+            $user_id = requireLogin();
+            $primary_id = (int) ($_POST['primary_exercise_id'] ?? 0);
+            $name = trim((string) ($_POST['name'] ?? ''));
+
+            if ($name === '') {
+                respond_err('Nome alternativa mancante');
+            }
+
+            // Titolare dell'utente (e davvero un titolare): da qui eredito i default.
+            $primary = db_one(
+                "SELECT e.id, e.workout_id, e.target_sets, e.target_reps, e.rest_seconds
+                   FROM exercises e
+                   JOIN workouts w ON w.id = e.workout_id
+                  WHERE e.id = ? AND w.user_id = ? AND e.alternative_of IS NULL",
+                [$primary_id, $user_id]
+            );
+            if ($primary === null) {
+                respond_err('Esercizio titolare non trovato');
+            }
+
+            $target_sets = ($_POST['target_sets'] ?? '') === ''
+                ? $primary['target_sets'] : (int) $_POST['target_sets'];
+            $target_reps = ($_POST['target_reps'] ?? '') === ''
+                ? $primary['target_reps'] : trim((string) $_POST['target_reps']);
+            $rest = ($_POST['rest_seconds'] ?? '') === ''
+                ? (int) $primary['rest_seconds'] : (int) $_POST['rest_seconds'];
+
+            $url = trim((string) ($_POST['url'] ?? ''));
+            if ($url !== '' && !valid_url($url)) {
+                respond_err('URL non valido (usa http:// o https://)');
+            }
+            $url = $url === '' ? null : $url;
+
+            $new_id = db_insert(
+                "INSERT INTO exercises
+                    (workout_id, name, type, target_sets, target_reps,
+                     rest_seconds, url, position, alternative_of)
+                 VALUES (?, ?, 'reps', ?, ?, ?, ?, 0, ?)",
+                [$primary['workout_id'], $name, $target_sets, $target_reps,
+                 $rest, $url, $primary_id]
+            );
+
+            $row = db_one(
+                "SELECT id, name, type, target_sets, target_reps, rest_seconds, url, position
+                   FROM exercises WHERE id = ?",
+                [$new_id]
+            );
+            respond_ok(['exercise' => enrich_exercise($row, $user_id)]);
+            break;
+        }
+
+        // -- promote_alternative: l'alternativa diventa titolare dello slot --
+        case 'promote_alternative': {
+            $user_id = requireLogin();
+            $alt_id = (int) ($_POST['alternative_exercise_id'] ?? 0);
+
+            // Dev'essere un'alternativa dell'utente.
+            $alt = db_one(
+                "SELECT e.id, e.alternative_of
+                   FROM exercises e
+                   JOIN workouts w ON w.id = e.workout_id
+                  WHERE e.id = ? AND w.user_id = ? AND e.alternative_of IS NOT NULL",
+                [$alt_id, $user_id]
+            );
+            if ($alt === null) {
+                respond_err('Alternativa non trovata');
+            }
+            $primary_id = (int) $alt['alternative_of'];
+            $primary = db_one("SELECT id, position FROM exercises WHERE id = ?", [$primary_id]);
+            if ($primary === null) {
+                respond_err('Titolare non trovato');
+            }
+
+            // Scambio dei ruoli nello slot, in transazione.
+            db()->beginTransaction();
+            try {
+                // 1) le altre alternative dello slot puntano al nuovo titolare
+                db_run("UPDATE exercises SET alternative_of = ? WHERE alternative_of = ? AND id <> ?",
+                    [$alt_id, $primary_id, $alt_id]);
+                // 2) il vecchio titolare scala ad alternativa del nuovo
+                db_run("UPDATE exercises SET alternative_of = ?, position = 0 WHERE id = ?",
+                    [$alt_id, $primary_id]);
+                // 3) l'alternativa diventa titolare ed eredita la posizione
+                db_run("UPDATE exercises SET alternative_of = NULL, position = ? WHERE id = ?",
+                    [(int) $primary['position'], $alt_id]);
                 db()->commit();
             } catch (Throwable $e) {
                 db()->rollBack();
