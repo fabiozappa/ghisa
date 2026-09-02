@@ -6,10 +6,10 @@ Istruzioni per lavorare su questo progetto. Leggi tutto prima di scrivere codice
 
 ## 1. Cos'è
 
-PWA per seguire le proprie schede di allenamento in palestra, dal telefono.
+**Ghisa** — PWA per seguire le proprie schede di allenamento in palestra, dal telefono.
 Filosofia KISS: nessuna email, nessun tracciamento, nessuna dipendenza esterna.
 
-**Versione attuale: v1, uso personale, utente singolo.**
+**Stato: v1 completa e in uso reale, utente singolo.**
 L'apertura ad altri utenti verrà dopo. Lo schema DB è già multi-utente, l'interfaccia no.
 
 Il valore dell'app sta nello **storico dei carichi**: è l'unico dato non ricostruibile.
@@ -31,22 +31,25 @@ Se pensi che serva una dipendenza esterna, **fermati e chiedi**. La risposta è 
 
 ## 3. Struttura dei file
 
+Tutti i file stanno nella **root del progetto** (nessuna sottocartella, a parte le icone).
+
 ```
-/allenamenti/
-  index.php          login + guardia di sessione + shell dell'app
-  api.php            front controller: switch su $_POST['action'], risponde SEMPRE JSON
-  db.php             connessione PDO + helper
-  auth.php           sessione, login, logout, requireLogin()
-  seed.php           script una tantum: crea utente e scheda iniziale (da cancellare dopo)
-  schema.sql         schema completo del database
-  app.js             player, coda offline, wake lock, chiamate API
-  style.css
-  sw.js              service worker (solo cache asset statici)
-  manifest.json
-  /icons/            icone PWA
+index.php          login + guardia di sessione + logout + shell dell'app
+api.php            front controller: switch su $_POST['action'], risponde SEMPRE JSON
+db.php             connessione PDO + helper di query
+auth.php           sessione, login, logout, requireLogin()
+config.php         credenziali DB — NON versionato (.gitignore), uno per ambiente
+schema.sql         schema completo del database
+app.js             player, coda offline, wake lock, alternative, editor, chiamate API
+style.css
+sw.js              service worker (solo cache asset statici)
+manifest.json
+/icons/            icone PWA
 ```
 
 **Non creare altri file senza chiedere.** Questa struttura è deliberatamente piatta.
+`seed.php` è esistito per creare il primo utente ed è stato cancellato dopo l'uso,
+come previsto: per creare un utente su un ambiente nuovo si importa il DB.
 
 ---
 
@@ -79,11 +82,37 @@ Il precompilato del peso si cerca **prima per `exercise_id`, poi in fallback per
 esercizio normalizzato** (LOWER + TRIM) sull'utente corrente. Serve perché importando o
 ricreando una scheda gli ID cambiano, ma "Panca Piana" resta "Panca Piana".
 
+### Slot e alternative
+
+Una riga della scheda è uno **slot**: un esercizio *titolare* più il pool delle alternative
+già usate al suo posto.
+
+- `exercises.alternative_of` è un auto-collegamento: se valorizzato, quella riga è
+  un'alternativa dello slot il cui titolare è l'esercizio puntato.
+- I titolari hanno `alternative_of IS NULL`. **Ogni query che elenca una scheda deve
+  filtrarlo**, altrimenti le alternative compaiono come esercizi veri.
+- Rendere definitiva un'alternativa (`promote_alternative`) **scambia i ruoli**: l'alternativa
+  diventa titolare ed eredita la `position`, il vecchio titolare scala nel pool, e le altre
+  alternative vengono ripuntate al nuovo titolare.
+- Anche le sostituzioni "una tantum" restano nel pool: è ciò che alimenta le proposte future.
+
+### Cestino a 30 giorni
+
+Schede ed esercizi si cancellano in **soft delete** (`deleted_at`). Dopo 30 giorni la riga
+sparisce davvero, via `purge_expired()`, chiamata al login e all'apertura dell'editor:
+**niente cron**, pulizia pigra.
+
+La cancellazione definitiva non intacca lo storico, per costruzione: FK in `SET NULL`,
+nome e target denormalizzati dentro il log, e fallback per nome nel lookup dell'ultimo peso.
+
 ### Altro
 
-- La colonna `share_code` esiste già in `workouts`, ma in v1 **non ha nessuna UI**. Non implementarla.
+- La colonna `share_code` esiste già in `workouts`, ma **non ha nessuna UI**. Non implementarla.
 - `exercises.rest_seconds` c'è ed è usato: il timer di recupero è una funzione di v1.
-- `exercises.type` ha l'ENUM `('reps','time')`, ma in v1 **implementa solo il ramo `reps`**.
+- `exercises.url` è un link esplicativo (immagine, video, pagina). Accetta **solo http/https**:
+  va validato sia lato server sia prima di diventare un `href`.
+- `exercises.type` ha l'ENUM `('reps','time')`, ma **è implementato solo il ramo `reps`**.
+- `position` ordina sia le schede sia gli esercizi (riordino con frecce, non drag&drop).
 - Indice su `workout_logs(user_id, started_at)` per lo storico.
 
 ---
@@ -123,17 +152,44 @@ Header `Content-Type: application/json; charset=utf-8`. Codice HTTP 200 anche su
 applicativi (il client legge `ok`); 401 solo per sessione scaduta, così il client sa che deve
 rimandare al login.
 
-**Le action di v1 sono cinque. Non aggiungerne altre senza chiedere:**
+**Le action sono 15. Non aggiungerne altre senza chiedere.**
+
+*Sessione e allenamento*
 
 | action | input | output |
 |---|---|---|
-| `login` | `word1`, `word2` | esito |
-| `get_workout` | `workout_id` | scheda + esercizi + ultimo peso per esercizio |
-| `log_set` | `client_uid`, `workout_log_id`, `exercise_id`, `set_number`, `weight_kg`, `reps_completed` | esito |
+| `login` | `word1`, `word2` | utente + schede (vive e in cestino) |
+| `get_workout` | `workout_id` | **apre una sessione** e ritorna scheda, esercizi, ultimo peso e serie dell'ultima volta |
+| `log_set` | `client_uid`, `workout_log_id`, `exercise_id`, `set_number`, `weight_kg`, `reps_completed` | esito (idempotente) |
 | `finish_workout` | `workout_log_id`, `notes` | riepilogo testuale generato |
+| `cancel_workout` | `workout_log_id` | scarta la sessione: cancellazione **fisica** di log e serie |
 | `get_history` | `limit`, `offset` | lista sessioni con dettaglio |
 
-Il CRUD delle schede in v1 **non esiste**: si fa in phpMyAdmin o via `seed.php`.
+*Alternative*
+
+| action | input | output |
+|---|---|---|
+| `get_alternatives` | `exercise_id` (il titolare) | pool dello slot |
+| `add_alternative` | `primary_exercise_id`, `name`, `target_sets`, `target_reps`, `rest_seconds`, `url` | l'alternativa creata |
+| `promote_alternative` | `alternative_exercise_id` | scambio dei ruoli nello slot |
+
+*CRUD schede*
+
+| action | input | output |
+|---|---|---|
+| `get_workout_edit` | `workout_id` | scheda + esercizi **senza aprire una sessione** |
+| `save_workout` | `workout_id` (opz.), `name` | crea o rinomina + elenco schede |
+| `delete_workout` | `workout_id`, `restore` | cestino o ripristino + elenco schede |
+| `save_exercise` | `exercise_id` (opz.) **oppure** `workout_id`, `name`, `target_sets`, `target_reps`, `rest_seconds`, `url` | crea o modifica |
+| `delete_exercise` | `exercise_id`, `restore` | soft delete o ripristino |
+| `reorder` | `type` (`workout`\|`exercise`), `ids` ordinati e separati da virgola | riscrive le `position` |
+
+⚠️ **`get_workout` apre una sessione a ogni chiamata.** Per leggere una scheda senza
+registrare un allenamento esiste `get_workout_edit`. Non confonderli, o l'editor
+genererebbe un log fantasma a ogni apertura.
+
+Il **logout non è un'action**: è gestito da `index.php?logout=1`, perché la sessione è
+roba della shell, non un dato dell'app.
 
 ---
 
@@ -154,8 +210,11 @@ questi sono dati dell'utente sul dispositivo dell'utente, e vanno salvati.
 ### Wake Lock
 
 `navigator.wakeLock.request('screen')` all'avvio del player.
+**Va richiesto dentro il gesto utente**, non dopo un `await`: Safari rifiuta la richiesta
+se l'attivazione è già scaduta.
 **Va ri-richiesto su `visibilitychange`**, perché il lock si perde quando la tab va in background.
-Serve HTTPS. Se l'API non c'è (Safari < 16.4), mostra un avviso e prosegui senza crashare.
+Serve HTTPS: su `http://` l'API non esiste proprio. Se manca, si prosegue **in silenzio** —
+avvisare a ogni allenamento di una cosa non risolvibile è solo rumore.
 
 ### Service worker
 
@@ -167,20 +226,28 @@ Cache dei soli asset statici (`style.css`, `app.js`, icone, `manifest.json`).
 Tasti grandi, alto contrasto, pensati per mani sudate. L'input del peso è `type="number"`
 con `inputmode="decimal"` e `step="0.5"`. Il target di tap minimo è 48px.
 
+Ogni azione che **scrive dati** (Avanti, Salta esercizio) si blocca ~1,2s dopo il tap e
+mostra una conferma verde. Non è vezzo estetico: un doppio tap accidentale creerebbe una
+serie fantasma nello storico, e l'idempotenza su `client_uid` protegge dai reinvii di
+rete, non da due tap umani.
+
 ---
 
-## 8. Fuori scope in v1
+## 8. Fuori scope
 
 Non implementare, non proporre, non "predisporre" con codice morto:
 
 - Registrazione automatica di nuovi utenti dal login
 - Share code, import e clonazione schede
-- CRUD delle schede da interfaccia
 - Vista a calendario (lo storico è una lista cronologica inversa)
-- Esercizi a tempo e countdown
+- Esercizi a tempo e countdown (il ramo `time` non è implementato)
 - Grafici, statistiche, PR, badge, gamification
 
 Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
+
+> **CRUD delle schede** e **alternative agli esercizi** erano fuori scope in v1: sono
+> stati implementati dopo, su richiesta esplicita e in quest'ordine — prima le
+> alternative (nate da un problema emerso in palestra), poi il CRUD.
 
 ---
 
@@ -207,10 +274,28 @@ Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 
 ---
 
-## 11. Ambiente locale
+## 11. Ambienti
+
+### Locale (sviluppo)
 
 Stack Homebrew su macOS Apple Silicon: httpd + php 8 + MariaDB.
-Vhost locale per hostname, convenzione già in uso: `local.allenamenti.fabiozappa.it`.
-Editor: Nova.
+Vhost: **`local.g3.fabiozappa.it`**, database **`ghisa`**. Editor: Nova.
+Per una prova rapida va bene anche `php -S 127.0.0.1:8765` dalla root del progetto.
 
-> Verifica e correggi hostname e percorsi alla prima sessione: qui sono un'ipotesi.
+### Produzione
+
+**`https://ghisa.fabiozappa.it`**, aggiornata a mano **via FTP**. Il passaggio a git è
+previsto ma non ancora fatto.
+
+### Regole di deploy — leggile prima di toccare il server
+
+1. ⚠️ **Non eseguire mai `schema.sql` in produzione.** Ha i `DROP TABLE` in testa:
+   cancellerebbe tutto lo storico. Serve solo a ricreare il DB da zero in locale.
+2. Le modifiche di schema si portano in produzione con **`ALTER TABLE ... IF NOT EXISTS`**
+   scritte a mano, così sono rilanciabili senza danno. Ogni volta che cambia `schema.sql`,
+   serve la ALTER corrispondente.
+3. **Non sovrascrivere `config.php`**: il server ha il suo, con credenziali diverse.
+4. Se cambi `sw.js`, **cambia anche il nome della cache**, altrimenti i telefoni continuano
+   a servire la versione vecchia.
+5. `display_errors = Off`. Gli errori si loggano, non si stampano.
+6. Lo storico vive lì: verifica che ci sia un **backup del database**.
