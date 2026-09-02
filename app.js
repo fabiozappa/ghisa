@@ -95,6 +95,56 @@ function daysAgoLabel(dt) {
     return days + ' giorni fa';
 }
 
+// Data e ora leggibili all'italiana: 31/08/2026 18:42
+function formatStamp(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} `
+        + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Riepilogo pronto da incollare altrove: la data/ora finisce in coda alla
+// prima riga (che è il nome della scheda), così resta compatto.
+function summaryWithStamp(summary) {
+    const stamp = formatStamp(new Date());
+    const lines = String(summary || '').split('\n');
+    if (lines.length && lines[0].trim() !== '') {
+        lines[0] = lines[0] + ' — ' + stamp;
+        return lines.join('\n');
+    }
+    return stamp + '\n' + summary;
+}
+
+// Copia negli appunti. La via moderna richiede un contesto sicuro (HTTPS o
+// localhost): sul vhost in http:// non c'è, quindi si ripiega sulla textarea
+// nascosta + execCommand, che lì funziona ancora.
+async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (e) {
+            // cade nel fallback qui sotto
+        }
+    }
+
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);   // serve su iOS
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch (e) {
+        return false;
+    }
+}
+
 // Avviso effimero in alto.
 function toast(msg) {
     let t = $('#toast');
@@ -436,6 +486,8 @@ function buildPlayerSkeleton() {
                        step="1" min="0">
             </label>
 
+            <div class="p-bar" id="p-bar" aria-hidden="true"></div>
+
             <button id="p-next" class="big primary">Avanti</button>
 
             <div class="p-extra">
@@ -482,6 +534,7 @@ function renderCurrentSet() {
     $('#p-exercise').textContent = ex.name;
     $('#p-target').textContent = ex.target ? 'Obiettivo ' + ex.target : '';
     $('#p-set').textContent = `Serie ${player.setNumber} di ${total}`;
+    renderSetBar(ex);
     renderLastSets(ex);
 
     // Link esplicativo dell'esercizio, se presente e sicuro (http/https).
@@ -545,6 +598,9 @@ function renderExerciseList() {
 // Tap su "Avanti": registra il set in locale, avanza subito, avvia il recupero.
 function onNextSet() {
     ensureAudio();                 // sblocca l'audio col gesto dell'utente
+    tapBuzz();
+    confirmTap($('#p-next'), '✓ Serie registrata');
+
     const ex = currentExercise();
     const weightRaw = $('#p-weight').value.trim();
     const repsRaw = $('#p-reps').value.trim();
@@ -592,6 +648,56 @@ function setsPlanned(ex) {
     return (parseInt(ex.target_sets, 10) || 1) + (ex._extra || 0);
 }
 
+// Barra delle serie sopra "Avanti": una casella per serie prevista.
+// Piena = fatta, contornata = corrente, vuota = da fare. Si adatta al "+ Serie".
+function renderSetBar(ex) {
+    const bar = $('#p-bar');
+    if (!bar) return;
+    bar.textContent = '';
+
+    const total = setsPlanned(ex);
+    for (let i = 1; i <= total; i++) {
+        const block = document.createElement('span');
+        block.className = 'p-block';
+        if (i < player.setNumber) {
+            block.classList.add('done');
+        } else if (i === player.setNumber) {
+            block.classList.add('current');
+        }
+        bar.appendChild(block);
+    }
+}
+
+// Quanto resta bloccato un tasto dopo il tap.
+const TAP_LOCK_MS = 1200;
+
+// Blocca il tasto per un istante mostrando una conferma. Serve a due cose:
+// rendere evidente che il tap è stato registrato, e impedire il doppio tap
+// accidentale (che creerebbe una serie fantasma nello storico: l'idempotenza
+// su client_uid protegge dai reinvii di rete, non da due tap umani).
+function confirmTap(btn, confirmLabel) {
+    if (!btn || btn.disabled) return;
+
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('confirming');
+    btn.textContent = confirmLabel;
+
+    setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('confirming');
+        btn.disabled = false;
+    }, TAP_LOCK_MS);
+}
+
+// Conferma tattile immediata: col telefono in mano e lo sguardo altrove
+// è il segnale che arriva prima di tutti. Su iOS non c'è, pazienza.
+function tapBuzz() {
+    if (navigator.vibrate) {
+        navigator.vibrate(30);
+    }
+}
+
 // "+ Serie": aggiunge una serie all'esercizio corrente, senza toccare la scheda.
 function addExtraSet() {
     const ex = currentExercise();
@@ -602,6 +708,9 @@ function addExtraSet() {
 
 // "Salta esercizio": passa al prossimo senza registrare nulla per questo.
 function skipExercise() {
+    tapBuzz();
+    confirmTap($('#p-skip'), '✓ Saltato');
+
     player.exIndex += 1;
     player.setNumber = 1;
     player.lastWeight = null;
@@ -1068,6 +1177,31 @@ function showSummary(summary) {
     pre.className = 'summary';
     pre.textContent = summary || '';       // testo generato dal server
     summaryView.appendChild(pre);
+
+    // Copia il riepilogo (con data e ora) per incollarlo in un'altra app.
+    const copy = document.createElement('button');
+    copy.className = 'big primary';
+    copy.textContent = '📋 Copia riepilogo';
+    copy.addEventListener('click', async () => {
+        const ok = await copyText(summaryWithStamp(summary));
+        if (ok) {
+            tapBuzz();
+            confirmTap(copy, '✓ Copiato');
+        } else {
+            // Ripiego finale: seleziono il testo, così lo copi a mano.
+            try {
+                const range = document.createRange();
+                range.selectNodeContents(pre);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            } catch (e) {
+                // niente selezione: resta comunque il testo a schermo
+            }
+            toast('Copia non riuscita: testo selezionato, copialo a mano.');
+        }
+    });
+    summaryView.appendChild(copy);
 
     const back = document.createElement('button');
     back.className = 'big';
