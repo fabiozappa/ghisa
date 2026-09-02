@@ -20,17 +20,27 @@ if (isset($_GET['logout'])) {
 $logged = is_logged_in();
 
 $workouts = [];
+$deleted_workouts = [];
 if ($logged) {
     $workouts = db_all(
-        "SELECT w.id, w.name,
+        "SELECT w.id, w.name, w.position,
                 (SELECT MAX(wl.finished_at)
                    FROM workout_logs wl
                   WHERE wl.workout_id = w.id
                     AND wl.user_id = w.user_id
                     AND wl.finished_at IS NOT NULL) AS last_finished
            FROM workouts w
-          WHERE w.user_id = ?
-          ORDER BY w.id",
+          WHERE w.user_id = ? AND w.deleted_at IS NULL
+          ORDER BY w.position, w.id",
+        [current_user_id()]
+    );
+
+    // Schede nel cestino, per il "Mostra eliminate / Ripristina".
+    $deleted_workouts = db_all(
+        "SELECT id, name, deleted_at
+           FROM workouts
+          WHERE user_id = ? AND deleted_at IS NOT NULL
+          ORDER BY deleted_at DESC",
         [current_user_id()]
     );
 }
@@ -96,7 +106,8 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
         // Stato iniziale iniettato dal server. Le schede ci sono solo se loggato.
         window.GHISA = {
             loggedIn: <?= $logged ? 'true' : 'false' ?>,
-            workouts: <?= json_encode($workouts, $json_flags) ?>
+            workouts: <?= json_encode($workouts, $json_flags) ?>,
+            deleted_workouts: <?= json_encode($deleted_workouts, $json_flags) ?>
         };
     </script>
     <script src="app.js" defer></script>

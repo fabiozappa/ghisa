@@ -36,11 +36,13 @@ CREATE TABLE users (
 -- workouts — le schede (anagrafica). Appartengono a un utente.
 -- ---------------------------------------------------------------------------
 CREATE TABLE workouts (
-    id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    user_id    INT UNSIGNED NOT NULL,
-    name       VARCHAR(120) NOT NULL,
-    share_code VARCHAR(36)  DEFAULT NULL,          -- esiste ma senza UI in v1
-    created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id         INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+    user_id    INT UNSIGNED      NOT NULL,
+    name       VARCHAR(120)      NOT NULL,
+    share_code VARCHAR(36)       DEFAULT NULL,          -- esiste ma senza UI in v1
+    position   SMALLINT UNSIGNED NOT NULL DEFAULT 0,    -- ordine nella home
+    deleted_at DATETIME          DEFAULT NULL,          -- cestino: definitivo dopo 30gg
+    created_at DATETIME          NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_workouts_user (user_id),
     -- CASCADE è ammesso: workouts è anagrafica, non un log.

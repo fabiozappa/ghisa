@@ -146,6 +146,57 @@ function valid_url(string $url): bool
     return (bool) preg_match('#^https?://#i', $url);
 }
 
+// Elenco schede: vive (ordinate) e in cestino. Lo restituiscono login e tutte
+// le action che modificano le schede, così il client si riallinea da solo.
+function workouts_payload(int $user_id): array
+{
+    $alive = db_all(
+        "SELECT w.id, w.name, w.position,
+                (SELECT MAX(wl.finished_at)
+                   FROM workout_logs wl
+                  WHERE wl.workout_id = w.id
+                    AND wl.user_id = w.user_id
+                    AND wl.finished_at IS NOT NULL) AS last_finished
+           FROM workouts w
+          WHERE w.user_id = ? AND w.deleted_at IS NULL
+          ORDER BY w.position, w.id",
+        [$user_id]
+    );
+    $deleted = db_all(
+        "SELECT id, name, deleted_at
+           FROM workouts
+          WHERE user_id = ? AND deleted_at IS NOT NULL
+          ORDER BY deleted_at DESC",
+        [$user_id]
+    );
+    return ['workouts' => $alive, 'deleted_workouts' => $deleted];
+}
+
+// Pulizia pigra del cestino: quello che è lì da più di 30 giorni sparisce
+// davvero. Niente cron, gira all'accesso e all'apertura dell'editor.
+// Lo storico non ne risente: i log hanno le FK in SET NULL e nome/target
+// denormalizzati dentro, e il lookup dell'ultimo peso ha il fallback per nome.
+function purge_expired(int $user_id): void
+{
+    // Esercizi scaduti (le loro alternative seguono in CASCADE).
+    db_run(
+        "DELETE e FROM exercises e
+           JOIN workouts w ON w.id = e.workout_id
+          WHERE w.user_id = ?
+            AND e.deleted_at IS NOT NULL
+            AND e.deleted_at < (NOW() - INTERVAL 30 DAY)",
+        [$user_id]
+    );
+    // Schede scadute (i loro esercizi seguono in CASCADE).
+    db_run(
+        "DELETE FROM workouts
+          WHERE user_id = ?
+            AND deleted_at IS NOT NULL
+            AND deleted_at < (NOW() - INTERVAL 30 DAY)",
+        [$user_id]
+    );
+}
+
 // Formatta un peso togliendo gli zeri decimali inutili: 70.00 -> "70kg".
 function fmt_weight($w): string
 {
@@ -197,23 +248,13 @@ try {
                 respond_err('Credenziali non valide');
             }
 
-            // Senza CRUD, il client deve sapere quali schede può aprire.
-            // Riporta anche l'ultima sessione COMPLETATA per scheda (per i
-            // "giorni fa" in home): solo finished_at valorizzato.
-            $workouts = db_all(
-                "SELECT w.id, w.name,
-                        (SELECT MAX(wl.finished_at)
-                           FROM workout_logs wl
-                          WHERE wl.workout_id = w.id
-                            AND wl.user_id = w.user_id
-                            AND wl.finished_at IS NOT NULL) AS last_finished
-                   FROM workouts w
-                  WHERE w.user_id = ?
-                  ORDER BY w.id",
-                [$user_id]
-            );
+            // Occasione buona per svuotare il cestino scaduto.
+            purge_expired($user_id);
 
-            respond_ok(['user_id' => $user_id, 'workouts' => $workouts]);
+            respond_ok(array_merge(
+                ['user_id' => $user_id],
+                workouts_payload($user_id)
+            ));
             break;
         }
 
@@ -223,7 +264,8 @@ try {
             $workout_id = (int) ($_POST['workout_id'] ?? 0);
 
             $workout = db_one(
-                "SELECT id, name FROM workouts WHERE id = ? AND user_id = ?",
+                "SELECT id, name FROM workouts
+                  WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 [$workout_id, $user_id]
             );
             if ($workout === null) {
@@ -525,6 +567,243 @@ try {
             }
 
             respond_ok();
+            break;
+        }
+
+        // -- get_workout_edit: scheda + esercizi SENZA aprire una sessione ---
+        case 'get_workout_edit': {
+            $user_id = requireLogin();
+            purge_expired($user_id);
+
+            $workout_id = (int) ($_POST['workout_id'] ?? 0);
+            $workout = db_one(
+                "SELECT id, name, position FROM workouts
+                  WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                [$workout_id, $user_id]
+            );
+            if ($workout === null) {
+                respond_err('Scheda non trovata');
+            }
+
+            $exercises = db_all(
+                "SELECT id, name, target_sets, target_reps, rest_seconds, url, position
+                   FROM exercises
+                  WHERE workout_id = ? AND alternative_of IS NULL AND deleted_at IS NULL
+                  ORDER BY position, id",
+                [$workout_id]
+            );
+            foreach ($exercises as &$e) {
+                $e['target'] = build_target($e['target_sets'], $e['target_reps']);
+            }
+            unset($e);
+
+            $deleted = db_all(
+                "SELECT id, name, target_sets, target_reps, deleted_at
+                   FROM exercises
+                  WHERE workout_id = ? AND alternative_of IS NULL AND deleted_at IS NOT NULL
+                  ORDER BY deleted_at DESC",
+                [$workout_id]
+            );
+
+            respond_ok([
+                'workout'   => $workout,
+                'exercises' => $exercises,
+                'deleted'   => $deleted,
+            ]);
+            break;
+        }
+
+        // -- save_workout: crea (senza id) o rinomina (con id) ---------------
+        case 'save_workout': {
+            $user_id = requireLogin();
+            $workout_id = (int) ($_POST['workout_id'] ?? 0);
+            $name = trim((string) ($_POST['name'] ?? ''));
+
+            if ($name === '') {
+                respond_err('Il nome non può essere vuoto');
+            }
+
+            if ($workout_id > 0) {
+                $own = db_one("SELECT id FROM workouts WHERE id = ? AND user_id = ?",
+                    [$workout_id, $user_id]);
+                if ($own === null) {
+                    respond_err('Scheda non trovata');
+                }
+                db_run("UPDATE workouts SET name = ? WHERE id = ? AND user_id = ?",
+                    [$name, $workout_id, $user_id]);
+            } else {
+                $pos = (int) db_value(
+                    "SELECT COALESCE(MAX(position), 0) + 1 FROM workouts WHERE user_id = ?",
+                    [$user_id]
+                );
+                $workout_id = db_insert(
+                    "INSERT INTO workouts (user_id, name, position) VALUES (?, ?, ?)",
+                    [$user_id, $name, $pos]
+                );
+            }
+
+            respond_ok(array_merge(
+                ['workout_id' => $workout_id],
+                workouts_payload($user_id)
+            ));
+            break;
+        }
+
+        // -- delete_workout: cestino (o ripristino con restore=1) ------------
+        case 'delete_workout': {
+            $user_id = requireLogin();
+            $workout_id = (int) ($_POST['workout_id'] ?? 0);
+            $restore = ($_POST['restore'] ?? '') === '1';
+
+            $own = db_one("SELECT id FROM workouts WHERE id = ? AND user_id = ?",
+                [$workout_id, $user_id]);
+            if ($own === null) {
+                respond_err('Scheda non trovata');
+            }
+
+            if ($restore) {
+                db_run("UPDATE workouts SET deleted_at = NULL WHERE id = ? AND user_id = ?",
+                    [$workout_id, $user_id]);
+            } else {
+                db_run("UPDATE workouts SET deleted_at = NOW() WHERE id = ? AND user_id = ?",
+                    [$workout_id, $user_id]);
+            }
+
+            respond_ok(workouts_payload($user_id));
+            break;
+        }
+
+        // -- save_exercise: crea (senza id) o modifica (con id) --------------
+        case 'save_exercise': {
+            $user_id = requireLogin();
+            $exercise_id = (int) ($_POST['exercise_id'] ?? 0);
+            $name = trim((string) ($_POST['name'] ?? ''));
+
+            if ($name === '') {
+                respond_err('Il nome non può essere vuoto');
+            }
+
+            $sets = ($_POST['target_sets'] ?? '') === '' ? null : (int) $_POST['target_sets'];
+            $reps = trim((string) ($_POST['target_reps'] ?? ''));
+            $reps = $reps === '' ? null : $reps;
+            $rest = ($_POST['rest_seconds'] ?? '') === '' ? 90 : (int) $_POST['rest_seconds'];
+
+            $url = trim((string) ($_POST['url'] ?? ''));
+            if ($url !== '' && !valid_url($url)) {
+                respond_err('URL non valido (usa http:// o https://)');
+            }
+            $url = $url === '' ? null : $url;
+
+            if ($exercise_id > 0) {
+                $own = db_one(
+                    "SELECT e.id FROM exercises e
+                       JOIN workouts w ON w.id = e.workout_id
+                      WHERE e.id = ? AND w.user_id = ?",
+                    [$exercise_id, $user_id]
+                );
+                if ($own === null) {
+                    respond_err('Esercizio non trovato');
+                }
+                db_run(
+                    "UPDATE exercises
+                        SET name = ?, target_sets = ?, target_reps = ?,
+                            rest_seconds = ?, url = ?
+                      WHERE id = ?",
+                    [$name, $sets, $reps, $rest, $url, $exercise_id]
+                );
+            } else {
+                $workout_id = (int) ($_POST['workout_id'] ?? 0);
+                $own = db_one(
+                    "SELECT id FROM workouts WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                    [$workout_id, $user_id]
+                );
+                if ($own === null) {
+                    respond_err('Scheda non trovata');
+                }
+                $pos = (int) db_value(
+                    "SELECT COALESCE(MAX(position), 0) + 1 FROM exercises
+                      WHERE workout_id = ? AND alternative_of IS NULL",
+                    [$workout_id]
+                );
+                $exercise_id = db_insert(
+                    "INSERT INTO exercises
+                        (workout_id, name, type, target_sets, target_reps,
+                         rest_seconds, url, position)
+                     VALUES (?, ?, 'reps', ?, ?, ?, ?, ?)",
+                    [$workout_id, $name, $sets, $reps, $rest, $url, $pos]
+                );
+            }
+
+            respond_ok(['exercise_id' => $exercise_id]);
+            break;
+        }
+
+        // -- delete_exercise: soft delete (o ripristino con restore=1) -------
+        case 'delete_exercise': {
+            $user_id = requireLogin();
+            $exercise_id = (int) ($_POST['exercise_id'] ?? 0);
+            $restore = ($_POST['restore'] ?? '') === '1';
+
+            $own = db_one(
+                "SELECT e.id FROM exercises e
+                   JOIN workouts w ON w.id = e.workout_id
+                  WHERE e.id = ? AND w.user_id = ?",
+                [$exercise_id, $user_id]
+            );
+            if ($own === null) {
+                respond_err('Esercizio non trovato');
+            }
+
+            if ($restore) {
+                db_run("UPDATE exercises SET deleted_at = NULL WHERE id = ?", [$exercise_id]);
+            } else {
+                db_run("UPDATE exercises SET deleted_at = NOW() WHERE id = ?", [$exercise_id]);
+            }
+
+            respond_ok();
+            break;
+        }
+
+        // -- reorder: riscrive le position (type = workout | exercise) -------
+        case 'reorder': {
+            $user_id = requireLogin();
+            $type = (string) ($_POST['type'] ?? '');
+            if ($type !== 'workout' && $type !== 'exercise') {
+                respond_err('Tipo non valido');
+            }
+
+            $ids = array_values(array_filter(
+                array_map('intval', explode(',', (string) ($_POST['ids'] ?? '')))
+            ));
+            if (!$ids) {
+                respond_err('Nessun elemento da ordinare');
+            }
+
+            db()->beginTransaction();
+            try {
+                $pos = 1;
+                foreach ($ids as $id) {
+                    if ($type === 'workout') {
+                        db_run("UPDATE workouts SET position = ? WHERE id = ? AND user_id = ?",
+                            [$pos, $id, $user_id]);
+                    } else {
+                        db_run(
+                            "UPDATE exercises e
+                               JOIN workouts w ON w.id = e.workout_id
+                                SET e.position = ?
+                              WHERE e.id = ? AND w.user_id = ?",
+                            [$pos, $id, $user_id]
+                        );
+                    }
+                    $pos++;
+                }
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+            respond_ok($type === 'workout' ? workouts_payload($user_id) : null);
             break;
         }
 

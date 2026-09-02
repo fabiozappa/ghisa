@@ -51,10 +51,16 @@ const els = {
     history:     $('#history-view'),
 };
 
-// Le schermate riepilogo, fine e alternative le crea app.js (index.php non le prevede).
+// Le schermate riepilogo, fine, alternative ed editor le crea app.js
+// (index.php non le prevede).
 let summaryView = null;
 let finishView = null;
 let altView = null;
+let editView = null;
+
+// Stato della home: modalità gestione e cestino schede aperto.
+let homeEditMode = false;
+let homeShowDeleted = false;
 
 
 // ===========================================================================
@@ -348,6 +354,18 @@ function showScreen(name) {
     if (summaryView) summaryView.hidden = name !== 'summary';
     if (finishView) finishView.hidden = name !== 'finish';
     if (altView) altView.hidden = name !== 'alt';
+    if (editView) editView.hidden = name !== 'edit';
+}
+
+// Riallinea l'elenco schede (vive + cestino) da una risposta del server.
+function applyWorkoutsPayload(data) {
+    if (!data) return;
+    if (Array.isArray(data.workouts)) {
+        window.GHISA.workouts = data.workouts;
+    }
+    if (Array.isArray(data.deleted_workouts)) {
+        window.GHISA.deleted_workouts = data.deleted_workouts;
+    }
 }
 
 
@@ -367,7 +385,7 @@ async function handleLogin(e) {
         });
         if (res.ok) {
             window.GHISA.loggedIn = true;
-            window.GHISA.workouts = res.data.workouts || [];
+            applyWorkoutsPayload(res.data);
             showApp(true);
             renderHome();
             showScreen('home');
@@ -393,38 +411,217 @@ function renderHome() {
     els.home.textContent = '';
 
     const h = document.createElement('h2');
-    h.textContent = 'Le tue schede';
+    h.textContent = homeEditMode ? 'Gestisci schede' : 'Le tue schede';
     els.home.appendChild(h);
 
     if (workouts.length === 0) {
         const p = document.createElement('p');
-        p.textContent = 'Nessuna scheda. Creane una in phpMyAdmin.';
+        p.textContent = homeEditMode
+            ? 'Nessuna scheda. Creane una qui sotto.'
+            : 'Nessuna scheda. Vai su "Gestisci schede" per crearne una.';
         els.home.appendChild(p);
     }
 
-    workouts.forEach((w) => {
-        const btn = document.createElement('button');
-        btn.className = 'big wk';
+    workouts.forEach((w, i) => {
+        if (homeEditMode) {
+            els.home.appendChild(renderWorkoutEditRow(w, i, workouts.length));
+        } else {
+            // Modalità allenamento: un tasto grande e pulito che avvia.
+            const btn = document.createElement('button');
+            btn.className = 'big wk';
 
-        const name = document.createElement('span');
-        name.className = 'wk-name';
-        name.textContent = w.name;            // textContent: niente XSS
-        btn.appendChild(name);
+            const name = document.createElement('span');
+            name.className = 'wk-name';
+            name.textContent = w.name;            // textContent: niente XSS
+            btn.appendChild(name);
 
-        const sub = document.createElement('span');
-        sub.className = 'wk-sub';
-        sub.textContent = daysAgoLabel(w.last_finished);
-        btn.appendChild(sub);
+            const sub = document.createElement('span');
+            sub.className = 'wk-sub';
+            sub.textContent = daysAgoLabel(w.last_finished);
+            btn.appendChild(sub);
 
-        btn.addEventListener('click', () => startWorkout(w.id));
-        els.home.appendChild(btn);
+            btn.addEventListener('click', () => startWorkout(w.id));
+            els.home.appendChild(btn);
+        }
     });
 
-    const histBtn = document.createElement('button');
-    histBtn.className = 'link';
-    histBtn.textContent = 'Storico allenamenti';
-    histBtn.addEventListener('click', openHistory);
-    els.home.appendChild(histBtn);
+    if (homeEditMode) {
+        const add = document.createElement('button');
+        add.className = 'big primary';
+        add.textContent = '+ Nuova scheda';
+        add.addEventListener('click', createWorkout);
+        els.home.appendChild(add);
+
+        renderDeletedWorkouts();
+
+        const done = document.createElement('button');
+        done.className = 'link';
+        done.textContent = 'Fine';
+        done.addEventListener('click', () => {
+            homeEditMode = false;
+            homeShowDeleted = false;
+            renderHome();
+        });
+        els.home.appendChild(done);
+    } else {
+        const histBtn = document.createElement('button');
+        histBtn.className = 'link';
+        histBtn.textContent = 'Storico allenamenti';
+        histBtn.addEventListener('click', openHistory);
+        els.home.appendChild(histBtn);
+
+        const manage = document.createElement('button');
+        manage.className = 'link';
+        manage.textContent = 'Gestisci schede';
+        manage.addEventListener('click', () => {
+            homeEditMode = true;
+            renderHome();
+        });
+        els.home.appendChild(manage);
+    }
+}
+
+// Riga scheda in modalità gestione: nome (apre l'editor) + riordino + cestino.
+function renderWorkoutEditRow(w, i, total) {
+    const row = document.createElement('div');
+    row.className = 'edit-row';
+
+    const name = document.createElement('button');
+    name.className = 'edit-name';
+    name.textContent = w.name;
+    name.addEventListener('click', () => openEditor(w.id));
+    row.appendChild(name);
+
+    const tools = document.createElement('div');
+    tools.className = 'edit-tools';
+    tools.appendChild(toolBtn('↑', i === 0, () => moveWorkout(i, -1)));
+    tools.appendChild(toolBtn('↓', i === total - 1, () => moveWorkout(i, 1)));
+    tools.appendChild(toolBtn('🗑', false, () => trashWorkout(w)));
+    row.appendChild(tools);
+
+    return row;
+}
+
+function renderDeletedWorkouts() {
+    const del = window.GHISA.deleted_workouts || [];
+    if (!del.length) return;
+
+    const tog = document.createElement('button');
+    tog.className = 'link';
+    tog.textContent = homeShowDeleted
+        ? 'Nascondi eliminate'
+        : `Mostra eliminate (${del.length})`;
+    tog.addEventListener('click', () => {
+        homeShowDeleted = !homeShowDeleted;
+        renderHome();
+    });
+    els.home.appendChild(tog);
+
+    if (!homeShowDeleted) return;
+
+    del.forEach((w) => {
+        const row = document.createElement('div');
+        row.className = 'edit-row deleted';
+        const nm = document.createElement('span');
+        nm.className = 'edit-name';
+        nm.textContent = w.name;
+        row.appendChild(nm);
+        const b = toolBtn('↩', false, () => restoreWorkout(w));
+        row.appendChild(b);
+        els.home.appendChild(row);
+    });
+
+    const note = document.createElement('p');
+    note.className = 'alt-for';
+    note.textContent = 'Le eliminate spariscono per sempre dopo 30 giorni.';
+    els.home.appendChild(note);
+}
+
+async function createWorkout() {
+    const name = prompt('Nome della nuova scheda:');
+    if (name === null) return;
+    if (!name.trim()) {
+        toast('Serve il nome.');
+        return;
+    }
+    try {
+        const res = await api('save_workout', { name: name.trim() });
+        if (res.ok) {
+            applyWorkoutsPayload(res.data);
+            renderHome();
+            toast('Scheda creata');
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function moveWorkout(i, dir) {
+    const list = (window.GHISA.workouts || []).slice();
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+
+    try {
+        const res = await api('reorder', {
+            type: 'workout',
+            ids: list.map((w) => w.id).join(','),
+        });
+        if (res.ok) {
+            applyWorkoutsPayload(res.data);
+            renderHome();
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function trashWorkout(w) {
+    const ok = confirm(`Spostare «${w.name}» nel cestino?\n`
+        + 'Sparirà per sempre dopo 30 giorni. Lo storico resta comunque.');
+    if (!ok) return;
+    try {
+        const res = await api('delete_workout', { workout_id: w.id });
+        if (res.ok) {
+            applyWorkoutsPayload(res.data);
+            renderHome();
+            toast('Spostata nel cestino');
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function restoreWorkout(w) {
+    try {
+        const res = await api('delete_workout', { workout_id: w.id, restore: '1' });
+        if (res.ok) {
+            applyWorkoutsPayload(res.data);
+            renderHome();
+            toast('Ripristinata');
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+// Tastino quadrato per riordino/cestino/ripristino.
+function toolBtn(label, disabled, fn) {
+    const b = document.createElement('button');
+    b.className = 'tool';
+    b.type = 'button';
+    b.textContent = label;
+    b.disabled = !!disabled;
+    if (!disabled) b.addEventListener('click', fn);
+    return b;
 }
 
 
@@ -433,14 +630,20 @@ function renderHome() {
 // ===========================================================================
 
 async function startWorkout(workoutId) {
+    // Richiesto qui, non dopo l'await: il wake lock vuole un gesto utente
+    // "fresco" e Safari rifiuta la richiesta se l'attivazione è già scaduta.
+    acquireWakeLock();
+
     let res;
     try {
         res = await api('get_workout', { workout_id: workoutId });
     } catch (e) {
+        releaseWakeLock();
         toast('Serve la rete per iniziare un allenamento.');
         return;
     }
     if (!res.ok) {
+        releaseWakeLock();
         toast(res.error || 'Impossibile aprire la scheda.');
         return;
     }
@@ -459,7 +662,6 @@ async function startWorkout(workoutId) {
     buildPlayerSkeleton();
     renderCurrentSet();
     showScreen('player');
-    acquireWakeLock();
 }
 
 // Costruisce una volta la struttura statica del player; i singoli campi
@@ -1217,6 +1419,345 @@ function showSummary(summary) {
 
 
 // ===========================================================================
+// Editor scheda (CRUD)
+// ===========================================================================
+
+let editState = null;
+
+function ensureEditView() {
+    if (!editView) {
+        editView = document.createElement('section');
+        editView.id = 'edit-view';
+        editView.className = 'screen';
+        $('#app-view').appendChild(editView);
+    }
+}
+
+// Apre l'editor. Usa get_workout_edit, che NON apre una sessione di
+// allenamento (get_workout invece sì: sarebbe un log fantasma a ogni modifica).
+async function openEditor(workoutId) {
+    ensureEditView();
+    editState = { workoutId, loading: true, mode: 'list', showDeleted: false };
+    renderEditor();
+    showScreen('edit');
+
+    try {
+        const res = await api('get_workout_edit', { workout_id: workoutId });
+        if (res.ok) {
+            editState = {
+                workoutId,
+                workout: res.data.workout,
+                exercises: res.data.exercises || [],
+                deleted: res.data.deleted || [],
+                mode: 'list',
+                showDeleted: false,
+            };
+        } else {
+            editState = { workoutId, error: res.error || 'Errore.', mode: 'list' };
+        }
+    } catch (e) {
+        editState = {
+            workoutId,
+            error: 'Serve la rete per modificare la scheda.',
+            mode: 'list',
+        };
+    }
+    renderEditor();
+}
+
+function reloadEditor() {
+    return openEditor(editState.workoutId);
+}
+
+function renderEditor() {
+    editView.textContent = '';
+
+    if (editState.loading) {
+        const p = document.createElement('p');
+        p.textContent = 'Carico…';
+        editView.appendChild(p);
+        return;
+    }
+    if (editState.error) {
+        const p = document.createElement('p');
+        p.className = 'error';
+        p.textContent = editState.error;
+        editView.appendChild(p);
+        editView.appendChild(editBackButton());
+        return;
+    }
+    if (editState.mode === 'form') {
+        renderExerciseForm();
+        return;
+    }
+
+    const h = document.createElement('h2');
+    h.textContent = 'Modifica scheda';
+    editView.appendChild(h);
+
+    // Nome della scheda.
+    const nameField = altField('Nome della scheda', 'text');
+    nameField.input.value = editState.workout.name;
+    editView.appendChild(nameField.label);
+
+    const saveName = document.createElement('button');
+    saveName.className = 'link';
+    saveName.textContent = 'Salva nome';
+    saveName.addEventListener('click', () => renameWorkout(nameField.input.value));
+    editView.appendChild(saveName);
+
+    // Esercizi.
+    const t = document.createElement('h3');
+    t.className = 'exlist-title';
+    t.textContent = 'Esercizi';
+    editView.appendChild(t);
+
+    editState.exercises.forEach((ex, i) => {
+        editView.appendChild(
+            renderExerciseEditRow(ex, i, editState.exercises.length)
+        );
+    });
+
+    const add = document.createElement('button');
+    add.className = 'big primary';
+    add.textContent = '+ Aggiungi esercizio';
+    add.addEventListener('click', () => {
+        editState.mode = 'form';
+        editState.editing = null;
+        renderEditor();
+    });
+    editView.appendChild(add);
+
+    // Cestino esercizi.
+    if (editState.deleted.length) {
+        const tog = document.createElement('button');
+        tog.className = 'link';
+        tog.textContent = editState.showDeleted
+            ? 'Nascondi eliminati'
+            : `Mostra eliminati (${editState.deleted.length})`;
+        tog.addEventListener('click', () => {
+            editState.showDeleted = !editState.showDeleted;
+            renderEditor();
+        });
+        editView.appendChild(tog);
+
+        if (editState.showDeleted) {
+            editState.deleted.forEach((ex) => {
+                const row = document.createElement('div');
+                row.className = 'edit-row deleted';
+                const nm = document.createElement('span');
+                nm.className = 'edit-name';
+                nm.textContent = ex.name;
+                row.appendChild(nm);
+                row.appendChild(toolBtn('↩', false, () => restoreExercise(ex.id)));
+                editView.appendChild(row);
+            });
+            const note = document.createElement('p');
+            note.className = 'alt-for';
+            note.textContent = 'Gli eliminati spariscono per sempre dopo 30 giorni.';
+            editView.appendChild(note);
+        }
+    }
+
+    editView.appendChild(editBackButton());
+}
+
+function editBackButton() {
+    const back = document.createElement('button');
+    back.className = 'link';
+    back.textContent = '← Home';
+    back.addEventListener('click', () => {
+        renderHome();
+        showScreen('home');
+    });
+    return back;
+}
+
+function renderExerciseEditRow(ex, i, total) {
+    const row = document.createElement('div');
+    row.className = 'edit-row';
+
+    const name = document.createElement('button');
+    name.className = 'edit-name';
+    const line1 = document.createElement('span');
+    line1.className = 'wk-name';
+    line1.textContent = ex.name;
+    name.appendChild(line1);
+    const line2 = document.createElement('span');
+    line2.className = 'wk-sub';
+    line2.textContent = (ex.target || '—') + ' · rec ' + ex.rest_seconds + 's'
+        + (ex.url ? ' · link' : '');
+    name.appendChild(line2);
+    name.addEventListener('click', () => {
+        editState.mode = 'form';
+        editState.editing = ex;
+        renderEditor();
+    });
+    row.appendChild(name);
+
+    const tools = document.createElement('div');
+    tools.className = 'edit-tools';
+    tools.appendChild(toolBtn('↑', i === 0, () => moveExercise(i, -1)));
+    tools.appendChild(toolBtn('↓', i === total - 1, () => moveExercise(i, 1)));
+    tools.appendChild(toolBtn('🗑', false, () => trashExercise(ex)));
+    row.appendChild(tools);
+
+    return row;
+}
+
+function renderExerciseForm() {
+    const ex = editState.editing;
+
+    const h = document.createElement('h2');
+    h.textContent = ex ? 'Modifica esercizio' : 'Nuovo esercizio';
+    editView.appendChild(h);
+
+    const name = altField('Nome', 'text');
+    const sets = altField('Serie', 'number');
+    const reps = altField('Ripetizioni', 'text');
+    const rest = altField('Recupero (secondi)', 'number');
+    const url = altField('Link (opzionale)', 'url');
+
+    if (ex) {
+        name.input.value = ex.name || '';
+        sets.input.value = ex.target_sets != null ? ex.target_sets : '';
+        reps.input.value = ex.target_reps != null ? ex.target_reps : '';
+        rest.input.value = ex.rest_seconds != null ? ex.rest_seconds : '';
+        url.input.value = ex.url || '';
+    } else {
+        rest.input.value = '90';
+    }
+
+    [name, sets, reps, rest, url].forEach((f) => editView.appendChild(f.label));
+
+    const save = document.createElement('button');
+    save.className = 'big primary';
+    save.textContent = 'Salva';
+    save.addEventListener('click', async () => {
+        if (!name.input.value.trim()) {
+            toast('Serve il nome.');
+            return;
+        }
+        save.disabled = true;
+
+        const params = {
+            name: name.input.value.trim(),
+            target_sets: sets.input.value.trim(),
+            target_reps: reps.input.value.trim(),
+            rest_seconds: rest.input.value.trim(),
+            url: url.input.value.trim(),
+        };
+        if (ex) {
+            params.exercise_id = ex.id;
+        } else {
+            params.workout_id = editState.workoutId;
+        }
+
+        try {
+            const res = await api('save_exercise', params);
+            if (res.ok) {
+                toast('Salvato');
+                await reloadEditor();
+            } else {
+                toast(res.error || 'Errore.');
+                save.disabled = false;
+            }
+        } catch (e) {
+            toast('Serve la rete.');
+            save.disabled = false;
+        }
+    });
+    editView.appendChild(save);
+
+    const cancel = document.createElement('button');
+    cancel.className = 'link';
+    cancel.textContent = 'Annulla';
+    cancel.addEventListener('click', () => {
+        editState.mode = 'list';
+        editState.editing = null;
+        renderEditor();
+    });
+    editView.appendChild(cancel);
+}
+
+async function renameWorkout(newName) {
+    const name = (newName || '').trim();
+    if (!name) {
+        toast('Il nome non può essere vuoto.');
+        return;
+    }
+    try {
+        const res = await api('save_workout', {
+            workout_id: editState.workoutId,
+            name,
+        });
+        if (res.ok) {
+            applyWorkoutsPayload(res.data);
+            editState.workout.name = name;
+            toast('Nome aggiornato');
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function moveExercise(i, dir) {
+    const list = editState.exercises.slice();
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+
+    try {
+        const res = await api('reorder', {
+            type: 'exercise',
+            ids: list.map((e) => e.id).join(','),
+        });
+        if (res.ok) {
+            editState.exercises = list;
+            renderEditor();
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function trashExercise(ex) {
+    const ok = confirm(`Eliminare «${ex.name}»?\n`
+        + 'Resta nel cestino 30 giorni. Lo storico non viene toccato.');
+    if (!ok) return;
+    try {
+        const res = await api('delete_exercise', { exercise_id: ex.id });
+        if (res.ok) {
+            toast('Spostato nel cestino');
+            await reloadEditor();
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function restoreExercise(id) {
+    try {
+        const res = await api('delete_exercise', { exercise_id: id, restore: '1' });
+        if (res.ok) {
+            toast('Ripristinato');
+            await reloadEditor();
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+
+// ===========================================================================
 // Storico
 // ===========================================================================
 
@@ -1295,8 +1836,10 @@ function renderSession(s) {
 // ===========================================================================
 
 async function acquireWakeLock() {
+    // Non supportato (Safari < 16.4, o contesto non sicuro): si prosegue in
+    // silenzio. Avvisare a ogni allenamento di una cosa non risolvibile
+    // sarebbe solo rumore.
     if (!('wakeLock' in navigator)) {
-        toast('Schermo sempre acceso non supportato su questo browser.');
         return;
     }
     try {

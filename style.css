@@ -250,6 +250,47 @@ button:disabled { cursor: default; }
 }
 .p-extra .link { min-height: 44px; }
 
+/* Righe dell'editor (schede in gestione, esercizi). */
+.edit-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+}
+.edit-name {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: #fff;
+    text-align: left;
+    font-size: 1.05rem;
+    padding: 8px 4px;
+    min-height: 48px;
+    justify-content: center;
+}
+.edit-tools { display: flex; gap: 6px; flex: 0 0 auto; }
+.tool {
+    width: 44px;
+    height: 44px;
+    font-size: 1.1rem;
+    color: #fff;
+    background: var(--surface-2);
+    border: 2px solid #3a3a3d;
+    border-radius: 10px;
+}
+.tool:disabled { opacity: 0.35; }
+.edit-row.deleted { opacity: 0.75; }
+.edit-row.deleted .edit-name {
+    color: var(--muted);
+    text-decoration: line-through;
+}
+
 /* Etichetta "Al posto di …" nella schermata alternativa. */
 .alt-for { color: var(--muted); margin: -6px 0 14px; }
 
