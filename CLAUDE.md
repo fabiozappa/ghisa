@@ -226,8 +226,16 @@ avvisare a ogni allenamento di una cosa non risolvibile è solo rumore.
 
 ### Service worker
 
-Cache dei soli asset statici (`style.css`, `app.js`, icone, `manifest.json`).
-**Mai cachare le risposte di `api.php`.** Versiona il nome della cache e pulisci le vecchie in `activate`.
+Gestisce i soli asset statici (`style.css`, `app.js`, icone, `manifest.json`).
+**Mai cachare le risposte di `api.php`** né `index.php`, che sono dinamici.
+
+Strategia: **rete per prima, ripiego sulla cache**. Online prendi sempre l'ultima
+versione (e la risalvi), offline continui con quella salvata. La versione precedente era
+cache-first e serviva per sempre la copia vecchia: dopo un deploy bisognava reinstallare
+la PWA a mano.
+
+In più `index.php` aggiunge a `style.css` e `app.js` un `?v=<data del file>`: l'URL cambia
+da solo a ogni upload. **Non c'è nessun numero di versione da ricordare.**
 
 ### Interfaccia
 
@@ -311,7 +319,8 @@ previsto ma non ancora fatto.
    rilanciabile (`#1060` se la colonna c'è già). Ogni volta che cambia `schema.sql`,
    serve la ALTER corrispondente.
 3. **Non sovrascrivere `config.php`**: il server ha il suo, con credenziali diverse.
-4. Se cambi `sw.js`, **cambia anche il nome della cache**, altrimenti i telefoni continuano
-   a servire la versione vecchia.
+4. Gli asset si invalidano da soli (`?v=<data del file>` messo da `index.php` + service
+   worker rete-per-prima): **non serve toccare il nome della cache** a ogni deploy.
+   Cambialo solo se cambi la struttura di ciò che viene messo in cache.
 5. `display_errors = Off`. Gli errori si loggano, non si stampano.
 6. Lo storico vive lì: verifica che ci sia un **backup del database**.

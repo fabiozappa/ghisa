@@ -1,11 +1,17 @@
-// sw.js — service worker. Cache dei SOLI asset statici (CLAUDE.md punto 7).
-// Mai cachare api.php né index.php (dinamici, dipendono dalla sessione).
-// Il nome cache è versionato: cambialo per invalidare tutto.
+// sw.js — service worker. Gestisce i SOLI asset statici (CLAUDE.md punto 7).
+// Mai toccare api.php né index.php: sono dinamici e dipendono dalla sessione.
+//
+// Strategia: RETE PER PRIMA, con ripiego sulla cache.
+// La versione precedente era cache-first e serviva per sempre la copia
+// salvata: dopo un deploy ci si ritrovava con la vecchia app finché non si
+// reinstallava la PWA a mano. Così invece, online prendi sempre l'ultima
+// versione (e la risalvi), offline continui a usare quella in cache.
 
-const CACHE = 'ghisa-v1';
+const CACHE = 'ghisa-v2';
 
-// Percorsi relativi allo scope del service worker.
-const ASSETS = [
+// Percorsi degli asset da gestire. Il confronto è sul solo pathname: app.js e
+// style.css arrivano con un ?v=<data file>, quindi l'URL cambia a ogni upload.
+const ASSET_PATHS = [
     'style.css',
     'app.js',
     'manifest.json',
@@ -13,16 +19,12 @@ const ASSETS = [
     'icons/icon-512.png',
 ];
 
-// Install: pre-carica gli asset e attiva subito la nuova versione.
+// Install: si attiva subito, senza aspettare la chiusura delle altre schede.
 self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE)
-            .then((cache) => cache.addAll(ASSETS))
-            .then(() => self.skipWaiting())
-    );
+    event.waitUntil(self.skipWaiting());
 });
 
-// Activate: rimuove le cache vecchie.
+// Activate: butta via le cache delle versioni precedenti e prende il comando.
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys()
@@ -33,8 +35,6 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// Fetch: cache-first solo per i nostri asset statici. Tutto il resto
-// (index.php, api.php, POST) passa in rete senza essere intercettato.
 self.addEventListener('fetch', (event) => {
     const req = event.request;
     if (req.method !== 'GET') return;
@@ -42,10 +42,19 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(req.url);
     if (url.origin !== self.location.origin) return;
 
-    const isAsset = ASSETS.some((a) => url.pathname.endsWith('/' + a));
+    const isAsset = ASSET_PATHS.some((a) => url.pathname.endsWith('/' + a));
     if (!isAsset) return;
 
     event.respondWith(
-        caches.match(req).then((cached) => cached || fetch(req))
+        fetch(req)
+            .then((res) => {
+                // Copia in cache solo le risposte buone, per l'uso offline.
+                if (res && res.ok) {
+                    const copy = res.clone();
+                    caches.open(CACHE).then((cache) => cache.put(req, copy));
+                }
+                return res;
+            })
+            .catch(() => caches.match(req))
     );
 });

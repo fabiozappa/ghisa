@@ -45,6 +45,12 @@ if ($logged) {
     );
 }
 
+// Versione degli asset presa dalla data del file: cambia da sola a ogni
+// upload, quindi l'URL cambia e ne' il browser ne' il service worker possono
+// servirti una copia vecchia. Niente numeri di versione da ricordare a mano.
+$v_css = @filemtime(__DIR__ . '/style.css') ?: time();
+$v_js  = @filemtime(__DIR__ . '/app.js') ?: time();
+
 // Flag JSON-safe anche dentro <script> (niente breakout con </script>).
 $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
     | JSON_HEX_QUOT | JSON_HEX_AMP;
@@ -57,7 +63,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
     <meta name="theme-color" content="#111111">
     <title>Ghisa</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=<?= $v_css ?>">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
 <body data-logged-in="<?= $logged ? '1' : '0' ?>">
@@ -110,6 +116,6 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             deleted_workouts: <?= json_encode($deleted_workouts, $json_flags) ?>
         };
     </script>
-    <script src="app.js" defer></script>
+    <script src="app.js?v=<?= $v_js ?>" defer></script>
 </body>
 </html>
