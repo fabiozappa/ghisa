@@ -82,6 +82,10 @@ Il precompilato del peso si cerca **prima per `exercise_id`, poi in fallback per
 esercizio normalizzato** (LOWER + TRIM) sull'utente corrente. Serve perché importando o
 ricreando una scheda gli ID cambiano, ma "Panca Piana" resta "Panca Piana".
 
+Il valore proposto è quello dell'**ultima serie eseguita**, non della più pesante: è una
+scelta voluta, non un bug. Il quadro completo lo dà la riga "Ultima volta" nel player,
+che elenca tutte le serie della sessione precedente.
+
 ### Slot e alternative
 
 Una riga della scheda è uno **slot**: un esercizio *titolare* più il pool delle alternative
