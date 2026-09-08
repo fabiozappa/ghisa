@@ -25,11 +25,13 @@ let wakeLock = null;      // sentinella WakeLock, o null
 let restTimerId = null;   // interval del timer di recupero
 let flushing = false;     // evita flush concorrenti della coda
 let audioCtx = null;      // AudioContext per il beep di fine recupero
+let workTimer = null;     // countdown di lavoro degli esercizi a tempo
 
 // Chiavi localStorage.
 const K_QUEUE = 'GHISA_QUEUE';                 // array di set in attesa di invio
 const K_PENDING_FINISH = 'GHISA_PENDING_FINISH'; // chiusura sessione differita
 const K_PENDING_CANCEL = 'GHISA_PENDING_CANCEL'; // annullamento sessione differito
+const K_PENDING_DELETES = 'GHISA_PENDING_DELETES'; // serie annullate da cancellare
 
 
 // ===========================================================================
@@ -256,6 +258,7 @@ async function flushQueue() {
                 toast('Un set non è stato accettato dal server.');
             }
         }
+        await flushPendingDeletes();
         await maybeFinishPending();
         await tryCancelPending();
     } finally {
@@ -306,6 +309,74 @@ async function maybeFinishPending() {
         // Ancora offline: si riprova al prossimo flush.
     }
 }
+
+// --- Annulla ultima serie -------------------------------------------------
+// Rete di sicurezza per la serie fantasma che sfugge al blocco anti doppio tap.
+// Si può correggere solo la sessione in corso: lo storico chiuso resta immutabile.
+
+async function undoLastSet() {
+    if (!player || !player.history.length) {
+        toast('Nessuna serie da annullare.');
+        return;
+    }
+    if (!confirm('Annullare l\'ultima serie registrata?')) return;
+
+    const last = player.history.pop();
+
+    // Se non è ancora partita, basta toglierla dalla coda.
+    const stillQueued = queueGetAll().some((x) => x.client_uid === last.client_uid);
+    queueSave(queueGetAll().filter((x) => x.client_uid !== last.client_uid));
+
+    // Se era già arrivata al server va cancellata lì (idempotente).
+    if (!stillQueued) {
+        try {
+            const res = await api('delete_set', { client_uid: last.client_uid });
+            if (!res || !res.ok) addPendingDelete(last.client_uid);
+        } catch (e) {
+            addPendingDelete(last.client_uid);   // offline: si riprova dopo
+        }
+    }
+
+    // Riporta il player alla serie annullata.
+    player.exIndex = last.exIndex;
+    player.setNumber = last.setNumber;
+    player.lastWeight = last.weight;
+    stopRest();
+    stopWorkTimer();
+    renderCurrentSet();
+    toast('Serie annullata');
+}
+
+function getPendingDeletes() {
+    try {
+        return JSON.parse(localStorage.getItem(K_PENDING_DELETES) || '[]');
+    } catch (e) {
+        return [];
+    }
+}
+
+function addPendingDelete(clientUid) {
+    const list = getPendingDeletes();
+    list.push(clientUid);
+    localStorage.setItem(K_PENDING_DELETES, JSON.stringify(list));
+}
+
+// Riprova le cancellazioni rimaste indietro (annullo fatto da offline).
+async function flushPendingDeletes() {
+    const list = getPendingDeletes();
+    if (!list.length) return;
+    const left = [];
+    for (const uid of list) {
+        try {
+            const res = await api('delete_set', { client_uid: uid });
+            if (!res || !res.ok) left.push(uid);
+        } catch (e) {
+            left.push(uid);
+        }
+    }
+    localStorage.setItem(K_PENDING_DELETES, JSON.stringify(left));
+}
+
 
 // --- Annullamento sessione differito (per l'offline) ----------------------
 
@@ -657,6 +728,7 @@ async function startWorkout(workoutId) {
         exIndex: 0,
         setNumber: 1,
         lastWeight: null,
+        history: [],          // serie registrate, per l'annulla
     };
 
     buildPlayerSkeleton();
@@ -683,10 +755,12 @@ function buildPlayerSkeleton() {
                        step="0.5" min="0">
             </label>
             <label class="p-field">
-                Ripetizioni
+                <span id="p-reps-label">Ripetizioni</span>
                 <input id="p-reps" type="number" inputmode="numeric"
                        step="1" min="0">
             </label>
+
+            <button id="p-work" class="big work" type="button" hidden></button>
 
             <div class="p-bar" id="p-bar" aria-hidden="true"></div>
 
@@ -696,6 +770,7 @@ function buildPlayerSkeleton() {
                 <button id="p-add-set" class="link" type="button">+ Serie</button>
                 <button id="p-skip" class="link" type="button">Salta esercizio</button>
                 <button id="p-alt" class="link" type="button">Alternativa</button>
+                <button id="p-undo" class="link" type="button">↶ Annulla serie</button>
             </div>
 
             <div id="p-rest" class="p-rest" hidden>
@@ -717,6 +792,8 @@ function buildPlayerSkeleton() {
     $('#p-add-set').addEventListener('click', addExtraSet);
     $('#p-skip').addEventListener('click', skipExercise);
     $('#p-alt').addEventListener('click', openAlternatives);
+    $('#p-undo').addEventListener('click', undoLastSet);
+    $('#p-work').addEventListener('click', toggleWorkTimer);
     $('#p-finish').addEventListener('click', () => openFinish(false));
     $('#p-cancel').addEventListener('click', cancelSession);
     $('#p-rest-skip').addEventListener('click', stopRest);
@@ -760,9 +837,18 @@ function renderCurrentSet() {
         weightInput.value = '';
     }
 
-    // Precompilazione reps: il target se è un numero pulito, altrimenti vuoto.
+    // Precompilazione reps/secondi: il target se è un numero pulito.
     const repsInput = $('#p-reps');
     repsInput.value = /^\d+$/.test(ex.target_reps || '') ? ex.target_reps : '';
+
+    // Esercizio a tempo: cambia l'etichetta e compare il timer di lavoro.
+    // I secondi di tenuta finiscono in reps_completed, il recupero resta
+    // rest_seconds come per gli altri esercizi.
+    const isTime = ex.type === 'time';
+    $('#p-reps-label').textContent = isTime ? 'Secondi' : 'Ripetizioni';
+    stopWorkTimer();
+    $('#p-work').hidden = !isTime;
+    if (isTime) renderWorkButton();
 
     renderExerciseList();
     stopRest();
@@ -817,6 +903,12 @@ function onNextSet() {
         reps_completed: repsRaw === '' ? null : repsRaw,
     };
     queueAdd(set);
+    player.history.push({
+        client_uid: set.client_uid,
+        exIndex: player.exIndex,
+        setNumber: player.setNumber,
+        weight: player.lastWeight,
+    });
     player.lastWeight = weightRaw === '' ? player.lastWeight : weightRaw;
 
     // Prova a inviare in background, senza bloccare la UI.
@@ -937,7 +1029,10 @@ function renderLastSets(ex) {
     const parts = sets.map((s) => {
         const reps = (s.reps_completed === null || s.reps_completed === '')
             ? '—' : s.reps_completed;
-        return fmtWeight(s.weight_kg) + '×' + reps;
+        // Senza peso (corpo libero o esercizio a tempo) basta il valore.
+        return (s.weight_kg === null || s.weight_kg === '')
+            ? String(reps)
+            : fmtWeight(s.weight_kg) + '×' + reps;
     });
     box.textContent = 'Ultima volta: ' + parts.join(', ');
     box.hidden = false;
@@ -1094,7 +1189,9 @@ function renderAltView(state) {
 function altField(text, type) {
     const label = document.createElement('label');
     label.className = 'p-field';
-    label.textContent = text;
+    const caption = document.createElement('span');
+    caption.textContent = text;
+    label.appendChild(caption);
     const input = document.createElement('input');
     input.type = type === 'number' ? 'number' : (type === 'url' ? 'url' : 'text');
     if (type === 'number') {
@@ -1103,7 +1200,27 @@ function altField(text, type) {
         input.step = '1';
     }
     label.appendChild(input);
-    return { label, input };
+    return { label, input, caption };
+}
+
+// Campo con menu a tendina (usato per il tipo di esercizio).
+function altSelect(text, options, value) {
+    const label = document.createElement('label');
+    label.className = 'p-field';
+    const caption = document.createElement('span');
+    caption.textContent = text;
+    label.appendChild(caption);
+
+    const input = document.createElement('select');
+    options.forEach(([v, t]) => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = t;
+        if (v === value) o.selected = true;
+        input.appendChild(o);
+    });
+    label.appendChild(input);
+    return { label, input, caption };
 }
 
 // Sostituisce a video l'esercizio dello slot con l'alternativa scelta.
@@ -1149,6 +1266,70 @@ function startRest(seconds) {
             count.textContent = remaining;
         }
     }, 1000);
+}
+
+// --- Timer di lavoro (esercizi a tempo) ----------------------------------
+// Un tap avvia la tenuta, un secondo tap la ferma prima. In entrambi i casi i
+// secondi effettivi finiscono nel campo, poi si registra la serie con "Avanti".
+
+function toggleWorkTimer() {
+    if (!player) return;
+
+    if (workTimer) {                       // già in corso: fermo prima
+        const done = workTimer.total - workTimer.remaining;
+        stopWorkTimer();
+        $('#p-reps').value = done > 0 ? done : '';
+        toast('Fermato a ' + done + 's');
+        return;
+    }
+
+    const ex = currentExercise();
+    const total = parseInt(ex.target_reps, 10) || 0;
+    if (total <= 0) {
+        toast('Imposta i secondi nella scheda.');
+        return;
+    }
+
+    ensureAudio();
+    tapBuzz();
+    workTimer = { total, remaining: total, id: null };
+    renderWorkButton();
+
+    workTimer.id = setInterval(() => {
+        workTimer.remaining -= 1;
+        if (workTimer.remaining <= 0) {
+            const t = workTimer.total;
+            stopWorkTimer();
+            $('#p-reps').value = t;        // tenuta completa
+            restEndCue();
+            toast('Tempo!');
+        } else {
+            renderWorkButton();
+        }
+    }, 1000);
+}
+
+function renderWorkButton() {
+    const btn = $('#p-work');
+    if (!btn || !player) return;
+    if (workTimer) {
+        btn.textContent = '■ Ferma — ' + workTimer.remaining + 's';
+        btn.classList.add('running');
+    } else {
+        const total = parseInt(currentExercise().target_reps, 10) || 0;
+        btn.textContent = total ? '▶ Avvia ' + total + 's' : '▶ Avvia';
+        btn.classList.remove('running');
+    }
+}
+
+function stopWorkTimer() {
+    if (workTimer && workTimer.id) {
+        clearInterval(workTimer.id);
+    }
+    workTimer = null;
+    const btn = $('#p-work');
+    if (btn) btn.classList.remove('running');
+    renderWorkButton();   // riporta l'etichetta a "Avvia"
 }
 
 // Segnale di fine recupero: vibrazione (dove supportata) + beep. In una sala
@@ -1585,8 +1766,10 @@ function renderExerciseEditRow(ex, i, total) {
     name.appendChild(line1);
     const line2 = document.createElement('span');
     line2.className = 'wk-sub';
+    const nAlt = (ex.alternatives || []).length;
     line2.textContent = (ex.target || '—') + ' · rec ' + ex.rest_seconds + 's'
-        + (ex.url ? ' · link' : '');
+        + (ex.url ? ' · link' : '')
+        + (nAlt ? ' · ' + nAlt + ' alt' : '');
     name.appendChild(line2);
     name.addEventListener('click', () => {
         editState.mode = 'form';
@@ -1613,10 +1796,22 @@ function renderExerciseForm() {
     editView.appendChild(h);
 
     const name = altField('Nome', 'text');
+    const type = altSelect('Tipo', [
+        ['reps', 'A ripetizioni'],
+        ['time', 'A tempo (secondi)'],
+    ], ex && ex.type === 'time' ? 'time' : 'reps');
     const sets = altField('Serie', 'number');
     const reps = altField('Ripetizioni', 'text');
     const rest = altField('Recupero (secondi)', 'number');
     const url = altField('Link (opzionale)', 'url');
+
+    // Per gli esercizi a tempo il campo non sono ripetizioni ma secondi.
+    const syncRepsCaption = () => {
+        reps.caption.textContent = type.input.value === 'time'
+            ? 'Secondi di tenuta' : 'Ripetizioni';
+    };
+    type.input.addEventListener('change', syncRepsCaption);
+    syncRepsCaption();
 
     if (ex) {
         name.input.value = ex.name || '';
@@ -1628,7 +1823,7 @@ function renderExerciseForm() {
         rest.input.value = '90';
     }
 
-    [name, sets, reps, rest, url].forEach((f) => editView.appendChild(f.label));
+    [name, type, sets, reps, rest, url].forEach((f) => editView.appendChild(f.label));
 
     const save = document.createElement('button');
     save.className = 'big primary';
@@ -1642,6 +1837,7 @@ function renderExerciseForm() {
 
         const params = {
             name: name.input.value.trim(),
+            type: type.input.value,
             target_sets: sets.input.value.trim(),
             target_reps: reps.input.value.trim(),
             rest_seconds: rest.input.value.trim(),
@@ -1668,6 +1864,39 @@ function renderExerciseForm() {
         }
     });
     editView.appendChild(save);
+
+    // Pool delle alternative già usate al posto di questo esercizio.
+    // delete_exercise funziona anche su di esse: qui c'è l'interfaccia.
+    if (ex && ex.alternatives && ex.alternatives.length) {
+        const at = document.createElement('h3');
+        at.className = 'exlist-title';
+        at.textContent = 'Alternative di questo esercizio';
+        editView.appendChild(at);
+
+        ex.alternatives.forEach((a) => {
+            const row = document.createElement('div');
+            row.className = 'edit-row';
+            const nm = document.createElement('span');
+            nm.className = 'edit-name';
+            const l1 = document.createElement('span');
+            l1.className = 'wk-name';
+            l1.textContent = a.name;
+            nm.appendChild(l1);
+            const l2 = document.createElement('span');
+            l2.className = 'wk-sub';
+            l2.textContent = a.target || '';
+            nm.appendChild(l2);
+            row.appendChild(nm);
+            row.appendChild(toolBtn('🗑', false, () => trashAlternative(a)));
+            editView.appendChild(row);
+        });
+
+        const note = document.createElement('p');
+        note.className = 'alt-for';
+        note.textContent = 'Sono le sostituzioni già usate al posto di questo '
+            + 'esercizio. Toglierne una la fa sparire dalle proposte.';
+        editView.appendChild(note);
+    }
 
     const cancel = document.createElement('button');
     cancel.className = 'link';
@@ -1733,6 +1962,21 @@ async function trashExercise(ex) {
         const res = await api('delete_exercise', { exercise_id: ex.id });
         if (res.ok) {
             toast('Spostato nel cestino');
+            await reloadEditor();
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+async function trashAlternative(a) {
+    if (!confirm(`Togliere «${a.name}» dalle alternative?`)) return;
+    try {
+        const res = await api('delete_exercise', { exercise_id: a.id });
+        if (res.ok) {
+            toast('Alternativa rimossa');
             await reloadEditor();
         } else {
             toast(res.error || 'Errore.');
@@ -1815,8 +2059,10 @@ function renderSession(s) {
         row.className = 'set-row';
         const reps = (set.reps_completed === null || set.reps_completed === '')
             ? '—' : set.reps_completed;
-        row.textContent =
-            `${set.exercise_name}: ${fmtWeight(set.weight_kg)}kg × ${reps}`;
+        const noWeight = set.weight_kg === null || set.weight_kg === '';
+        row.textContent = noWeight
+            ? `${set.exercise_name}: ${reps}`
+            : `${set.exercise_name}: ${fmtWeight(set.weight_kg)}kg × ${reps}`;
         card.appendChild(row);
     });
 

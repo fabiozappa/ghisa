@@ -30,14 +30,18 @@ function respond_err(string $message): void
 
 // Compone la stringa target "3x10" da sets e reps dell'anagrafica.
 // Ritorna null se non c'è alcun target.
-function build_target($sets, $reps): ?string
+function build_target($sets, $reps, string $type = 'reps'): ?string
 {
     $sets = ($sets === null || $sets === '') ? null : (int) $sets;
     $reps = ($reps === null || $reps === '') ? null : trim((string) $reps);
     if ($sets === null && $reps === null) {
         return null;
     }
-    return ($sets ?? '?') . 'x' . ($reps ?? '?');
+    // Per gli esercizi a tempo il valore sono secondi. L'unità finisce dentro
+    // il target, che è denormalizzato nel log: così anche lo storico resta
+    // leggibile senza dover sapere il `type` dell'anagrafica.
+    $unit = ($type === 'time') ? 's' : '';
+    return ($sets ?? '?') . 'x' . ($reps ?? '?') . $unit;
 }
 
 // Ultimo peso usato per un esercizio, per precompilare il campo.
@@ -134,7 +138,8 @@ function last_session_sets(int $user_id, int $exercise_id, string $exercise_name
 // esercizio qualsiasi.
 function enrich_exercise(array $ex, int $user_id): array
 {
-    $ex['target'] = build_target($ex['target_sets'], $ex['target_reps']);
+    $ex['target'] = build_target($ex['target_sets'], $ex['target_reps'],
+        $ex['type'] ?? 'reps');
     $ex['last_weight_kg'] = last_weight($user_id, (int) $ex['id'], $ex['name']);
     $ex['last_sets'] = last_session_sets($user_id, (int) $ex['id'], $ex['name']);
     return $ex;
@@ -209,7 +214,7 @@ function fmt_weight($w): string
 
 // Genera il riepilogo testuale di una sessione, raggruppando per esercizio
 // nell'ordine di esecuzione.
-function build_summary(array $log, array $rows): string
+function build_summary(array $log, array $rows, ?string $notes = null): string
 {
     $lines = [$log['workout_name']];
 
@@ -219,14 +224,25 @@ function build_summary(array $log, array $rows): string
         if (!isset($by_ex[$name])) {
             $by_ex[$name] = ['target' => $r['target'], 'sets' => []];
         }
-        $reps = ($r['reps_completed'] === null || $r['reps_completed'] === '')
+        $done = ($r['reps_completed'] === null || $r['reps_completed'] === '')
             ? '—' : (int) $r['reps_completed'];
-        $by_ex[$name]['sets'][] = fmt_weight($r['weight_kg']) . '×' . $reps;
+        // Senza peso (corpo libero o esercizio a tempo) si mostra il solo
+        // valore: "45" invece di un poco leggibile "—×45".
+        $by_ex[$name]['sets'][] =
+            ($r['weight_kg'] === null || $r['weight_kg'] === '')
+                ? (string) $done
+                : fmt_weight($r['weight_kg']) . '×' . $done;
     }
 
     foreach ($by_ex as $name => $info) {
         $target = $info['target'] ? " ({$info['target']})" : '';
         $lines[] = $name . $target . ': ' . implode(', ', $info['sets']);
+    }
+
+    // La nota chiude il riepilogo: così finisce anche nel testo copiato.
+    if ($notes !== null && trim($notes) !== '') {
+        $lines[] = '';
+        $lines[] = 'Nota: ' . trim($notes);
     }
 
     return implode("\n", $lines);
@@ -335,7 +351,7 @@ try {
             // che appartenga a una scheda dell'utente. Soft-deleted incluso: si
             // può finire di loggare un esercizio cancellato a metà sessione.
             $ex = db_one(
-                "SELECT e.name, e.target_sets, e.target_reps
+                "SELECT e.name, e.type, e.target_sets, e.target_reps
                    FROM exercises e
                    JOIN workouts w ON w.id = e.workout_id
                   WHERE e.id = ? AND w.user_id = ?",
@@ -344,7 +360,7 @@ try {
             if ($ex === null) {
                 respond_err('Esercizio non trovato');
             }
-            $target = build_target($ex['target_sets'], $ex['target_reps']);
+            $target = build_target($ex['target_sets'], $ex['target_reps'], $ex['type']);
 
             // INSERT idempotente: se lo stesso set torna dalla coda offline,
             // il vincolo UNIQUE su client_uid scatta e rispondiamo comunque ok.
@@ -365,6 +381,31 @@ try {
             }
 
             respond_ok(['duplicate' => false]);
+            break;
+        }
+
+        // -- delete_set: annulla una serie della sessione IN CORSO -----------
+        case 'delete_set': {
+            $user_id = requireLogin();
+            $client_uid = trim((string) ($_POST['client_uid'] ?? ''));
+            if ($client_uid === '') {
+                respond_err('client_uid mancante');
+            }
+
+            // Si può correggere solo la sessione che stai facendo: su una
+            // sessione già chiusa lo storico resta immutabile.
+            db_run(
+                "DELETE el FROM exercise_logs el
+                   JOIN workout_logs wl ON wl.id = el.workout_log_id
+                  WHERE el.client_uid = ?
+                    AND wl.user_id = ?
+                    AND wl.finished_at IS NULL",
+                [$client_uid, $user_id]
+            );
+
+            // Idempotente: se la serie non era mai arrivata al server va bene
+            // lo stesso, il client l'ha già tolta dalla sua coda.
+            respond_ok();
             break;
         }
 
@@ -400,7 +441,7 @@ try {
                 [$workout_log_id]
             );
 
-            $summary = build_summary($log, $rows);
+            $summary = build_summary($log, $rows, $notes);
 
             respond_ok([
                 'workout_log_id' => $workout_log_id,
@@ -485,7 +526,7 @@ try {
 
             // Titolare dell'utente (e davvero un titolare): da qui eredito i default.
             $primary = db_one(
-                "SELECT e.id, e.workout_id, e.target_sets, e.target_reps, e.rest_seconds
+                "SELECT e.id, e.workout_id, e.type, e.target_sets, e.target_reps, e.rest_seconds
                    FROM exercises e
                    JOIN workouts w ON w.id = e.workout_id
                   WHERE e.id = ? AND w.user_id = ? AND e.alternative_of IS NULL",
@@ -512,9 +553,9 @@ try {
                 "INSERT INTO exercises
                     (workout_id, name, type, target_sets, target_reps,
                      rest_seconds, url, position, alternative_of)
-                 VALUES (?, ?, 'reps', ?, ?, ?, ?, 0, ?)",
-                [$primary['workout_id'], $name, $target_sets, $target_reps,
-                 $rest, $url, $primary_id]
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                [$primary['workout_id'], $name, $primary['type'], $target_sets,
+                 $target_reps, $rest, $url, $primary_id]
             );
 
             $row = db_one(
@@ -586,14 +627,31 @@ try {
             }
 
             $exercises = db_all(
-                "SELECT id, name, target_sets, target_reps, rest_seconds, url, position
+                "SELECT id, name, type, target_sets, target_reps, rest_seconds, url, position
                    FROM exercises
                   WHERE workout_id = ? AND alternative_of IS NULL AND deleted_at IS NULL
                   ORDER BY position, id",
                 [$workout_id]
             );
+
+            // Pool alternative di tutta la scheda in una query sola, poi
+            // raggruppate per titolare: niente N+1.
+            $alts = db_all(
+                "SELECT id, name, type, target_sets, target_reps, alternative_of
+                   FROM exercises
+                  WHERE workout_id = ? AND alternative_of IS NOT NULL AND deleted_at IS NULL
+                  ORDER BY name",
+                [$workout_id]
+            );
+            $by_primary = [];
+            foreach ($alts as $a) {
+                $a['target'] = build_target($a['target_sets'], $a['target_reps'], $a['type']);
+                $by_primary[(int) $a['alternative_of']][] = $a;
+            }
+
             foreach ($exercises as &$e) {
-                $e['target'] = build_target($e['target_sets'], $e['target_reps']);
+                $e['target'] = build_target($e['target_sets'], $e['target_reps'], $e['type']);
+                $e['alternatives'] = $by_primary[(int) $e['id']] ?? [];
             }
             unset($e);
 
@@ -688,6 +746,9 @@ try {
             $reps = $reps === '' ? null : $reps;
             $rest = ($_POST['rest_seconds'] ?? '') === '' ? 90 : (int) $_POST['rest_seconds'];
 
+            // 'time' = esercizio a tempo: target_reps sono secondi di tenuta.
+            $type = ($_POST['type'] ?? '') === 'time' ? 'time' : 'reps';
+
             $url = trim((string) ($_POST['url'] ?? ''));
             if ($url !== '' && !valid_url($url)) {
                 respond_err('URL non valido (usa http:// o https://)');
@@ -706,10 +767,10 @@ try {
                 }
                 db_run(
                     "UPDATE exercises
-                        SET name = ?, target_sets = ?, target_reps = ?,
+                        SET name = ?, type = ?, target_sets = ?, target_reps = ?,
                             rest_seconds = ?, url = ?
                       WHERE id = ?",
-                    [$name, $sets, $reps, $rest, $url, $exercise_id]
+                    [$name, $type, $sets, $reps, $rest, $url, $exercise_id]
                 );
             } else {
                 $workout_id = (int) ($_POST['workout_id'] ?? 0);
@@ -729,8 +790,8 @@ try {
                     "INSERT INTO exercises
                         (workout_id, name, type, target_sets, target_reps,
                          rest_seconds, url, position)
-                     VALUES (?, ?, 'reps', ?, ?, ?, ?, ?)",
-                    [$workout_id, $name, $sets, $reps, $rest, $url, $pos]
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [$workout_id, $name, $type, $sets, $reps, $rest, $url, $pos]
                 );
             }
 

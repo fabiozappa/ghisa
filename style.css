@@ -433,3 +433,31 @@ textarea:focus { outline: none; border-color: var(--accent); }
     z-index: 50;
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Timer di lavoro degli esercizi a tempo. */
+.big.work {
+    background: var(--surface);
+    border-color: var(--accent);
+    color: #fff;
+}
+.big.work.running {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #1a1a1a;
+}
+
+/* Menu a tendina (tipo esercizio): stessa resa dei campi di testo. */
+select {
+    width: 100%;
+    min-height: var(--tap);
+    padding: 12px 14px;
+    font-family: inherit;
+    font-size: 1.15rem;
+    color: #fff;
+    background: var(--surface);
+    border: 2px solid #3a3a3d;
+    border-radius: 12px;
+    -webkit-appearance: none;
+    appearance: none;
+}
+select:focus { outline: none; border-color: var(--accent); }

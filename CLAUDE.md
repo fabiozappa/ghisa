@@ -115,7 +115,10 @@ nome e target denormalizzati dentro il log, e fallback per nome nel lookup dell'
 - `exercises.rest_seconds` c'è ed è usato: il timer di recupero è una funzione di v1.
 - `exercises.url` è un link esplicativo (immagine, video, pagina). Accetta **solo http/https**:
   va validato sia lato server sia prima di diventare un `href`.
-- `exercises.type` ha l'ENUM `('reps','time')`, ma **è implementato solo il ramo `reps`**.
+- `exercises.type` ENUM `('reps','time')`: **entrambi i rami sono implementati**. Per gli
+  esercizi a tempo i secondi di tenuta stanno in `target_reps` (nessuna colonna in più) e
+  l'unità finisce nel `target` denormalizzato (`3x45s`), così anche il log resta leggibile.
+  I secondi effettivi si registrano in `reps_completed`; il recupero resta `rest_seconds`.
 - `position` ordina sia le schede sia gli esercizi (riordino con frecce, non drag&drop).
 - Indice su `workout_logs(user_id, started_at)` per lo storico.
 
@@ -156,7 +159,7 @@ Header `Content-Type: application/json; charset=utf-8`. Codice HTTP 200 anche su
 applicativi (il client legge `ok`); 401 solo per sessione scaduta, così il client sa che deve
 rimandare al login.
 
-**Le action sono 15. Non aggiungerne altre senza chiedere.**
+**Le action sono 16. Non aggiungerne altre senza chiedere.**
 
 *Sessione e allenamento*
 
@@ -165,7 +168,8 @@ rimandare al login.
 | `login` | `word1`, `word2` | utente + schede (vive e in cestino) |
 | `get_workout` | `workout_id` | **apre una sessione** e ritorna scheda, esercizi, ultimo peso e serie dell'ultima volta |
 | `log_set` | `client_uid`, `workout_log_id`, `exercise_id`, `set_number`, `weight_kg`, `reps_completed` | esito (idempotente) |
-| `finish_workout` | `workout_log_id`, `notes` | riepilogo testuale generato |
+| `delete_set` | `client_uid` | annulla una serie della **sessione in corso** (idempotente; su sessione chiusa non fa nulla) |
+| `finish_workout` | `workout_log_id`, `notes` | riepilogo testuale generato, **nota inclusa** (finisce anche nel testo copiato) |
 | `cancel_workout` | `workout_log_id` | scarta la sessione: cancellazione **fisica** di log e serie |
 | `get_history` | `limit`, `offset` | lista sessioni con dettaglio |
 
@@ -230,6 +234,11 @@ Cache dei soli asset statici (`style.css`, `app.js`, icone, `manifest.json`).
 Tasti grandi, alto contrasto, pensati per mani sudate. L'input del peso è `type="number"`
 con `inputmode="decimal"` e `step="0.5"`. Il target di tap minimo è 48px.
 
+Gli esercizi a tempo hanno un **timer di lavoro**: un tap avvia la tenuta, un secondo tap
+la ferma prima, e in entrambi i casi i secondi effettivi finiscono nel campo. La serie si
+registra poi con "Avanti" come tutte le altre, quindi coda offline e idempotenza valgono
+identiche.
+
 Ogni azione che **scrive dati** (Avanti, Salta esercizio) si blocca ~1,2s dopo il tap e
 mostra una conferma verde. Non è vezzo estetico: un doppio tap accidentale creerebbe una
 serie fantasma nello storico, e l'idempotenza su `client_uid` protegge dai reinvii di
@@ -244,14 +253,14 @@ Non implementare, non proporre, non "predisporre" con codice morto:
 - Registrazione automatica di nuovi utenti dal login
 - Share code, import e clonazione schede
 - Vista a calendario (lo storico è una lista cronologica inversa)
-- Esercizi a tempo e countdown (il ramo `time` non è implementato)
 - Grafici, statistiche, PR, badge, gamification
 
 Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 
-> **CRUD delle schede** e **alternative agli esercizi** erano fuori scope in v1: sono
-> stati implementati dopo, su richiesta esplicita e in quest'ordine — prima le
-> alternative (nate da un problema emerso in palestra), poi il CRUD.
+> **CRUD delle schede**, **alternative agli esercizi** ed **esercizi a tempo** erano fuori
+> scope in v1: sono stati implementati dopo, su richiesta esplicita e in quest'ordine —
+> prima le alternative (nate da un problema emerso in palestra), poi il CRUD, infine il
+> ramo `time` insieme all'annulla-serie e alla gestione del pool alternative.
 
 ---
 
