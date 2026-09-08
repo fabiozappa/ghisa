@@ -291,8 +291,11 @@ previsto ma non ancora fatto.
 
 1. ⚠️ **Non eseguire mai `schema.sql` in produzione.** Ha i `DROP TABLE` in testa:
    cancellerebbe tutto lo storico. Serve solo a ricreare il DB da zero in locale.
-2. Le modifiche di schema si portano in produzione con **`ALTER TABLE ... IF NOT EXISTS`**
-   scritte a mano, così sono rilanciabili senza danno. Ogni volta che cambia `schema.sql`,
+2. Le modifiche di schema si portano in produzione con **`ALTER TABLE` scritte a mano**.
+   ⚠️ In locale c'è **MariaDB**, in produzione **MySQL**: `ADD COLUMN IF NOT EXISTS` è
+   un'estensione MariaDB e sul server risponde `#1064`. Quindi si verifica prima con
+   `SHOW COLUMNS FROM <tabella>;` e poi si lancia la ALTER semplice, che non è
+   rilanciabile (`#1060` se la colonna c'è già). Ogni volta che cambia `schema.sql`,
    serve la ALTER corrispondente.
 3. **Non sovrascrivere `config.php`**: il server ha il suo, con credenziali diverse.
 4. Se cambi `sw.js`, **cambia anche il nome della cache**, altrimenti i telefoni continuano
