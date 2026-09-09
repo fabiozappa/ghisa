@@ -141,7 +141,13 @@ button {
     min-height: 48px;
     text-decoration: underline;
 }
-.link.danger { color: #ff6b6b; }
+/* Le azioni distruttive stanno su una riga loro: affiancate a un "torna
+   indietro" invitano al tap sbagliato. */
+.link.danger {
+    color: #ff6b6b;
+    display: block;
+    width: 100%;
+}
 
 /* Scheda in home: nome + "giorni fa" su due righe. */
 .wk { display: flex; flex-direction: column; gap: 4px; }
@@ -468,4 +474,63 @@ select:focus { outline: none; border-color: var(--accent); }
     color: var(--muted);
     font-size: 0.9rem;
     margin: -4px 0 4px;
+}
+
+/* --- Pagina pubblica di una scheda condivisa ------------------------------ */
+body.public .screen { padding-top: 28px; }
+.public-kicker {
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 4px;
+}
+.public-title { font-size: 1.8rem; margin: 0 0 20px; }
+.public-list {
+    list-style: decimal;
+    padding-left: 1.6em;
+    margin: 0 0 24px;
+    color: var(--muted);
+}
+.public-ex {
+    padding: 10px 8px;
+    margin-bottom: 6px;
+    border-top: 1px solid #2a2a2d;
+}
+.public-ex-name {
+    display: block;
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+.public-ex-meta {
+    display: block;
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+}
+.public-ex-link {
+    display: inline-block;
+    margin-top: 4px;
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+/* Il CTA e' un <a>, non un <button>: gli serve la resa di .big */
+a.big { text-decoration: none; }
+.public-foot {
+    color: var(--muted);
+    font-size: 0.9rem;
+    border-top: 1px solid #2a2a2d;
+    padding-top: 16px;
+    margin-top: 24px;
+}
+
+/* Link di condivisione: URL lungo, deve andare a capo. */
+.share-link {
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    color: #cfcfcf;
+    word-break: break-all;
+    margin: 0 0 10px;
 }

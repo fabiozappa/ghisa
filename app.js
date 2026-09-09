@@ -32,6 +32,7 @@ const K_QUEUE = 'GHISA_QUEUE';                 // array di set in attesa di invi
 const K_PENDING_FINISH = 'GHISA_PENDING_FINISH'; // chiusura sessione differita
 const K_PENDING_CANCEL = 'GHISA_PENDING_CANCEL'; // annullamento sessione differito
 const K_PENDING_DELETES = 'GHISA_PENDING_DELETES'; // serie annullate da cancellare
+const K_PENDING_IMPORT = 'GHISA_PENDING_IMPORT';   // scheda da importare dopo l'accesso
 
 
 // ===========================================================================
@@ -470,6 +471,7 @@ async function handleLogin(e) {
             showApp(true);
             renderHome();
             showScreen('home');
+            consumePendingImport();
         } else {
             els.loginError.textContent = res.error || 'Accesso non riuscito';
             els.loginError.hidden = false;
@@ -502,6 +504,7 @@ async function handleRegister(e) {
             showApp(true);
             renderHome();
             showScreen('home');
+            consumePendingImport();
         } else {
             els.regError.textContent = res.error || 'Registrazione non riuscita';
             els.regError.hidden = false;
@@ -572,6 +575,12 @@ function renderHome() {
         add.textContent = '+ Nuova scheda';
         add.addEventListener('click', createWorkout);
         els.home.appendChild(add);
+
+        const imp = document.createElement('button');
+        imp.className = 'big';
+        imp.textContent = 'Importa da un link';
+        imp.addEventListener('click', () => importWorkout());
+        els.home.appendChild(imp);
 
         renderDeletedWorkouts();
 
@@ -1790,7 +1799,137 @@ function renderEditor() {
         }
     }
 
+    renderShareSection();
     editView.appendChild(editBackButton());
+}
+
+// Condivisione: non è automatica, la attiva il proprietario premendo un tasto.
+function renderShareSection() {
+    const h = document.createElement('h3');
+    h.className = 'exlist-title';
+    h.textContent = 'Condivisione';
+    editView.appendChild(h);
+
+    const code = editState.workout.share_code;
+
+    if (!code) {
+        const note = document.createElement('p');
+        note.className = 'alt-for';
+        note.textContent = 'Non condivisa. Attivandola ottieni un link da mandare '
+            + 'a chi vuoi: chi ce l\'ha vede la scheda e può importarla.';
+        editView.appendChild(note);
+
+        const on = document.createElement('button');
+        on.className = 'big';
+        on.textContent = 'Attiva condivisione';
+        on.addEventListener('click', () => toggleShare(true));
+        editView.appendChild(on);
+        return;
+    }
+
+    const url = shareUrl(code);
+
+    const box = document.createElement('p');
+    box.className = 'share-link';
+    box.textContent = url;
+    editView.appendChild(box);
+
+    const copy = document.createElement('button');
+    copy.className = 'big primary';
+    copy.textContent = '📋 Copia link';
+    copy.addEventListener('click', async () => {
+        const ok = await copyText(url);
+        if (ok) {
+            tapBuzz();
+            confirmTap(copy, '✓ Copiato');
+        } else {
+            toast('Copia non riuscita.');
+        }
+    });
+    editView.appendChild(copy);
+
+    const off = document.createElement('button');
+    off.className = 'link danger';
+    off.textContent = 'Revoca condivisione';
+    off.addEventListener('click', () => toggleShare(false));
+    editView.appendChild(off);
+}
+
+// Il link è assoluto e costruito dalla pagina corrente, così funziona anche
+// se l'app sta in una sottocartella.
+function shareUrl(code) {
+    return new URL('public_workout.php?s=' + encodeURIComponent(code), location.href).href;
+}
+
+async function toggleShare(enabled) {
+    if (!enabled) {
+        const ok = confirm('Revocare la condivisione?\n'
+            + 'Il link smetterà di funzionare. Chi l\'ha già importata tiene la sua copia.');
+        if (!ok) return;
+    }
+    try {
+        const res = await api('share_workout', {
+            workout_id: editState.workoutId,
+            enabled: enabled ? '1' : '0',
+        });
+        if (res.ok) {
+            editState.workout.share_code = res.data.share_code;
+            renderEditor();
+            toast(enabled ? 'Condivisione attiva' : 'Condivisione revocata');
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+// Import: accetta il link intero o il solo codice, ci pensa il server.
+async function importWorkout(code) {
+    const value = code || prompt('Incolla il link o il codice della scheda condivisa:');
+    if (value === null) return;
+    if (!String(value).trim()) {
+        toast('Serve il codice.');
+        return;
+    }
+    try {
+        const res = await api('import_workout', { share_code: String(value).trim() });
+        if (res.ok) {
+            applyWorkoutsPayload(res.data);
+            renderHome();
+            showScreen('home');
+            toast('Scheda importata');
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+// La pagina pubblica manda qui con ?import=<codice>. Se non si è ancora
+// entrati, il codice aspetta l'accesso invece di andare perso.
+function stashPendingImport() {
+    const code = new URLSearchParams(location.search).get('import');
+    if (!code) return;
+    try {
+        sessionStorage.setItem(K_PENDING_IMPORT, code);
+    } catch (e) { /* niente storage: pazienza */ }
+    history.replaceState(null, '', location.pathname);
+}
+
+function consumePendingImport() {
+    let code = null;
+    try {
+        code = sessionStorage.getItem(K_PENDING_IMPORT);
+        if (code) sessionStorage.removeItem(K_PENDING_IMPORT);
+    } catch (e) {
+        return;
+    }
+    if (!code) return;
+    if (confirm('Importare la scheda condivisa nel tuo account?')) {
+        importWorkout(code);
+    }
 }
 
 function editBackButton() {
@@ -2196,10 +2335,13 @@ function init() {
     // Riprova a svuotare la coda quando torna la rete.
     window.addEventListener('online', flushQueue);
 
+    stashPendingImport();
+
     if (window.GHISA && window.GHISA.loggedIn) {
         showApp(true);
         renderHome();
         showScreen('home');
+        consumePendingImport();
         // Alla ripresa, prova a smaltire code e chiusure rimaste in sospeso.
         flushQueue();
     } else {

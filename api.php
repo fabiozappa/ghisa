@@ -151,6 +151,50 @@ function valid_url(string $url): bool
     return (bool) preg_match('#^https?://#i', $url);
 }
 
+// Codice di condivisione: UUID v4 da random_bytes, quindi non indovinabile.
+// Non è automatico: lo genera il proprietario premendo un tasto.
+function generate_share_code(): string
+{
+    $b = random_bytes(16);
+    $b[6] = chr((ord($b[6]) & 0x0f) | 0x40);   // versione 4
+    $b[8] = chr((ord($b[8]) & 0x3f) | 0x80);   // variante RFC 4122
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($b), 4));
+}
+
+// Scheda condivisa a partire dal codice: anagrafica e nient'altro.
+// La usano sia l'import sia la pagina pubblica, che NON ha login: qui non
+// devono mai finire storico, pesi o dati dell'utente.
+// Ritorna ['workout' => [...], 'exercises' => [...]] oppure null.
+function shared_workout_by_code(string $code): ?array
+{
+    if ($code === '') {
+        return null;
+    }
+
+    $workout = db_one(
+        "SELECT id, name FROM workouts
+          WHERE share_code = ? AND deleted_at IS NULL",
+        [$code]
+    );
+    if ($workout === null) {
+        return null;
+    }
+
+    $exercises = db_all(
+        "SELECT id, name, type, target_sets, target_reps, rest_seconds, url, position
+           FROM exercises
+          WHERE workout_id = ? AND alternative_of IS NULL AND deleted_at IS NULL
+          ORDER BY position, id",
+        [$workout['id']]
+    );
+    foreach ($exercises as &$e) {
+        $e['target'] = build_target($e['target_sets'], $e['target_reps'], $e['type']);
+    }
+    unset($e);
+
+    return ['workout' => $workout, 'exercises' => $exercises];
+}
+
 // Elenco schede: vive (ordinate) e in cestino. Lo restituiscono login e tutte
 // le action che modificano le schede, così il client si riallinea da solo.
 function workouts_payload(int $user_id): array
@@ -658,7 +702,7 @@ try {
 
             $workout_id = (int) ($_POST['workout_id'] ?? 0);
             $workout = db_one(
-                "SELECT id, name, position FROM workouts
+                "SELECT id, name, position, share_code FROM workouts
                   WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 [$workout_id, $user_id]
             );
@@ -905,6 +949,126 @@ try {
             }
 
             respond_ok($type === 'workout' ? workouts_payload($user_id) : null);
+            break;
+        }
+
+        // -- share_workout: attiva o revoca il codice di condivisione --------
+        case 'share_workout': {
+            $user_id = requireLogin();
+            $workout_id = (int) ($_POST['workout_id'] ?? 0);
+            $enabled = ($_POST['enabled'] ?? '') === '1';
+
+            $own = db_one(
+                "SELECT id, share_code FROM workouts
+                  WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                [$workout_id, $user_id]
+            );
+            if ($own === null) {
+                respond_err('Scheda non trovata');
+            }
+
+            if (!$enabled) {
+                // Revoca: la pagina pubblica sparisce. Chi l'aveva già
+                // importata tiene la sua copia: sono righe indipendenti.
+                db_run("UPDATE workouts SET share_code = NULL WHERE id = ? AND user_id = ?",
+                    [$workout_id, $user_id]);
+                respond_ok(['share_code' => null]);
+            }
+
+            // Se è già condivisa si tiene il codice esistente, così i link
+            // già mandati in giro continuano a funzionare.
+            $code = $own['share_code'];
+            if ($code === null || $code === '') {
+                $code = generate_share_code();
+                db_run("UPDATE workouts SET share_code = ? WHERE id = ? AND user_id = ?",
+                    [$code, $workout_id, $user_id]);
+            }
+
+            respond_ok(['share_code' => $code]);
+            break;
+        }
+
+        // -- import_workout: copia nel proprio account una scheda condivisa --
+        case 'import_workout': {
+            $user_id = requireLogin();
+
+            // Si accetta sia il codice nudo sia il link intero: chi condivide
+            // manda un URL, ed è scomodo doverne estrarre il codice a mano.
+            $raw = trim((string) ($_POST['share_code'] ?? ''));
+            if (preg_match('/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i', $raw, $m)) {
+                $raw = strtolower($m[0]);
+            }
+
+            $shared = shared_workout_by_code($raw);
+            if ($shared === null) {
+                respond_err('Codice non valido o condivisione revocata');
+            }
+
+            $source_id = (int) $shared['workout']['id'];
+
+            // Alternative della scheda di origine, da rimappare sui nuovi id.
+            $alts = db_all(
+                "SELECT name, type, target_sets, target_reps, rest_seconds, url, alternative_of
+                   FROM exercises
+                  WHERE workout_id = ? AND alternative_of IS NOT NULL AND deleted_at IS NULL
+                  ORDER BY name",
+                [$source_id]
+            );
+
+            db()->beginTransaction();
+            try {
+                $pos = (int) db_value(
+                    "SELECT COALESCE(MAX(position), 0) + 1 FROM workouts WHERE user_id = ?",
+                    [$user_id]
+                );
+                // La copia NON nasce condivisa: il codice è di chi l'ha creata.
+                $new_workout_id = db_insert(
+                    "INSERT INTO workouts (user_id, name, position) VALUES (?, ?, ?)",
+                    [$user_id, $shared['workout']['name'], $pos]
+                );
+
+                // Prima i titolari, tenendo la mappa vecchio id -> nuovo id.
+                $map = [];
+                $p = 1;
+                foreach ($shared['exercises'] as $ex) {
+                    $map[(int) $ex['id']] = db_insert(
+                        "INSERT INTO exercises
+                            (workout_id, name, type, target_sets, target_reps,
+                             rest_seconds, url, position)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        [$new_workout_id, $ex['name'], $ex['type'], $ex['target_sets'],
+                         $ex['target_reps'], $ex['rest_seconds'], $ex['url'], $p]
+                    );
+                    $p++;
+                }
+
+                // Poi le alternative, agganciate ai NUOVI titolari: senza questo
+                // gli slot arriverebbero rotti.
+                foreach ($alts as $a) {
+                    $primary = $map[(int) $a['alternative_of']] ?? null;
+                    if ($primary === null) {
+                        continue;   // titolare non copiato (cancellato): si salta
+                    }
+                    db_insert(
+                        "INSERT INTO exercises
+                            (workout_id, name, type, target_sets, target_reps,
+                             rest_seconds, url, position, alternative_of)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                        [$new_workout_id, $a['name'], $a['type'], $a['target_sets'],
+                         $a['target_reps'], $a['rest_seconds'], $a['url'], $primary]
+                    );
+                }
+
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+            respond_ok(array_merge(
+                ['workout_id' => $new_workout_id],
+                workouts_payload($user_id)
+            ));
             break;
         }
 

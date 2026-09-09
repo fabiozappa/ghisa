@@ -44,6 +44,7 @@ config.php         credenziali DB — NON versionato (.gitignore), uno per ambie
 schema.sql         schema completo del database
 app.js             player, coda offline, wake lock, alternative, editor, chiamate API
 style.css
+public_workout.php pagina pubblica di una scheda condivisa (SENZA login)
 sw.js              service worker (solo cache asset statici)
 manifest.json
 /icons/            icone PWA
@@ -133,7 +134,11 @@ senza problemi. Chiave `(ip, username)`.
   scarto. Non confrontare mai un istante calcolato in PHP con un `NOW()` scritto dal
   database: i confronti temporali vanno fatti **dentro la query** (`TIMESTAMPDIFF`,
   `INTERVAL`). Sbagliarlo non dà errore, semplicemente non seleziona niente.
-- La colonna `share_code` esiste già in `workouts`, ma **non ha nessuna UI**. Non implementarla.
+- `workouts.share_code` è il codice di condivisione: UUID v4, `NULL` finché il proprietario
+  non attiva la condivisione premendo un tasto. **Non è mai automatico.** Revocarlo lo
+  rimette a `NULL`: la pagina pubblica sparisce, ma chi ha già importato tiene la sua
+  copia, perché l'import crea righe indipendenti. Riattivando si genera un codice nuovo,
+  quindi i link vecchi restano morti.
 - `exercises.rest_seconds` c'è ed è usato: il timer di recupero è una funzione di v1.
 - `exercises.url` è un link esplicativo (immagine, video, pagina). Accetta **solo http/https**:
   va validato sia lato server sia prima di diventare un `href`.
@@ -185,7 +190,7 @@ Header `Content-Type: application/json; charset=utf-8`. Codice HTTP 200 anche su
 applicativi (il client legge `ok`); 401 solo per sessione scaduta, così il client sa che deve
 rimandare al login.
 
-**Le action sono 17. Non aggiungerne altre senza chiedere.**
+**Le action sono 19. Non aggiungerne altre senza chiedere.**
 
 *Sessione e allenamento*
 
@@ -218,6 +223,13 @@ rimandare al login.
 | `save_exercise` | `exercise_id` (opz.) **oppure** `workout_id`, `name`, `target_sets`, `target_reps`, `rest_seconds`, `url` | crea o modifica |
 | `delete_exercise` | `exercise_id`, `restore` | soft delete o ripristino |
 | `reorder` | `type` (`workout`\|`exercise`), `ids` ordinati e separati da virgola | riscrive le `position` |
+
+*Condivisione*
+
+| action | input | output |
+|---|---|---|
+| `share_workout` | `workout_id`, `enabled` | genera o revoca il codice. Riattivare quando c'è già un codice **non lo cambia**, così i link mandati in giro reggono |
+| `import_workout` | `share_code` (accetta anche il link intero) | copia la scheda nel proprio account: **anagrafica e alternative rimappate**, mai lo storico |
 
 ⚠️ **`get_workout` apre una sessione a ogni chiamata.** Per leggere una scheda senza
 registrare un allenamento esiste `get_workout_edit`. Non confonderli, o l'editor
@@ -270,6 +282,23 @@ la PWA a mano.
 In più `index.php` aggiunge a `style.css` e `app.js` un `?v=<data del file>`: l'URL cambia
 da solo a ogni upload. **Non c'è nessun numero di versione da ricordare.**
 
+### Pagina pubblica (`public_workout.php`)
+
+Raggiungibile con `?s=<codice>`, **senza login**: chiunque abbia il codice vede. Perciò
+mostra **solo l'anagrafica** — nome scheda, esercizi, target, recupero, link — e mai
+storico, pesi o dati dell'utente. Il codice va trattato come una password.
+
+È renderizzata dal server (non da `app.js`) perché deve avere senso per i crawler e per le
+anteprime social: `title`, `description`, canonical e **Open Graph/Twitter card**, che è
+ciò che si vede incollando il link in chat.
+
+⚠️ È marcata **`noindex, nofollow`** di proposito: se venisse indicizzata, basterebbe un
+link pubblico per rendere cercabili gli allenamenti, e un contenuto in cache è difficile
+da ritirare. Per indicizzare davvero: togliere quel meta e valutare il JSON-LD.
+
+La query è riscritta lì invece di riusare `shared_workout_by_code()` di `api.php`, che è un
+front controller e non si può includere. Duplicazione voluta, non svista.
+
 ### Interfaccia
 
 Tasti grandi, alto contrasto, pensati per mani sudate. L'input del peso è `type="number"`
@@ -291,7 +320,6 @@ rete, non da due tap umani.
 
 Non implementare, non proporre, non "predisporre" con codice morto:
 
-- Share code, import e clonazione schede
 - Vista a calendario (lo storico è una lista cronologica inversa)
 - Grafici, statistiche, PR, badge, gamification
 
@@ -301,7 +329,7 @@ Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 > **registrazione utenti** erano fuori scope in v1: sono stati implementati dopo, su
 > richiesta esplicita e in quest'ordine — prima le alternative (nate da un problema emerso
 > in palestra), poi il CRUD, poi il ramo `time` con l'annulla-serie e la gestione del pool
-> alternative, infine il multi-utente (passo preparatorio allo share code).
+> alternative, poi il multi-utente, infine lo **share code con pagina pubblica e import**.
 >
 > ⚠️ La registrazione è aperta ma **mancano i termini d'uso e le condizioni**: vanno scritti
 > prima di pubblicizzare l'app.
