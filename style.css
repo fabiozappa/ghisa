@@ -67,7 +67,8 @@ body[data-logged-in="0"] #login-view { display: flex; }
     color: var(--accent);
 }
 
-#login-form { display: flex; flex-direction: column; gap: 16px; }
+#login-form,
+#register-form { display: flex; flex-direction: column; gap: 16px; }
 
 /* --- Campi ---------------------------------------------------------------- */
 label {
@@ -461,3 +462,10 @@ select {
     appearance: none;
 }
 select:focus { outline: none; border-color: var(--accent); }
+
+/* Nota esplicativa nel form di registrazione. */
+.reg-hint {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: -4px 0 4px;
+}

@@ -254,15 +254,55 @@ $action = $_POST['action'] ?? '';
 try {
     switch ($action) {
 
-        // -- login: word1, word2 -> esito + schede dell'utente ---------------
+        // -- register: crea un utente e lo lascia loggato --------------------
+        // Seconda e ultima action senza requireLogin, insieme a `login`.
+        case 'register': {
+            $result = register_user(
+                $_POST['username'] ?? '',
+                $_POST['word1'] ?? '',
+                $_POST['word2'] ?? ''
+            );
+
+            // register_user ritorna l'id, oppure il messaggio d'errore.
+            if (!is_int($result)) {
+                sleep(1);                      // rallenta i tentativi a raffica
+                respond_err($result);
+            }
+
+            respond_ok(array_merge(
+                ['user_id' => $result],
+                workouts_payload($result)
+            ));
+            break;
+        }
+
+        // -- login: username, word1, word2 -> esito + schede dell'utente -----
         case 'login': {
+            $username = $_POST['username'] ?? '';
             $word1 = $_POST['word1'] ?? '';
             $word2 = $_POST['word2'] ?? '';
 
-            $user_id = login($word1, $word2);
+            $ip = client_ip();
+            purge_login_attempts();                 // i tentativi vecchi scadono
+            $failures = login_failures($ip, $username);
+
+            // Oltre la soglia si risponde SUBITO, senza dormire: continuare ad
+            // allungare l'attesa terrebbe occupati i worker PHP, ed è proprio
+            // la leva che userebbe chi vuole mettere giù il server.
+            if ($failures >= LOGIN_HARD_LIMIT) {
+                respond_err('Troppi tentativi. Riprova fra qualche minuto.');
+            }
+
+            $user_id = login($username, $word1, $word2);
             if ($user_id === null) {
+                record_login_failure($ip, $username);
+                // 1° errore 1 secondo, 2° 2 secondi... fino al tetto.
+                sleep(min($failures + 1, LOGIN_MAX_DELAY));
+                // Messaggio generico: non si rivela se lo username esiste.
                 respond_err('Credenziali non valide');
             }
+
+            clear_login_failures($ip, $username);   // al successo si azzera
 
             // Occasione buona per svuotare il cestino scaduto.
             purge_expired($user_id);

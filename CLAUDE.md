@@ -9,8 +9,10 @@ Istruzioni per lavorare su questo progetto. Leggi tutto prima di scrivere codice
 **Ghisa** — PWA per seguire le proprie schede di allenamento in palestra, dal telefono.
 Filosofia KISS: nessuna email, nessun tracciamento, nessuna dipendenza esterna.
 
-**Stato: v1 completa e in uso reale, utente singolo.**
-L'apertura ad altri utenti verrà dopo. Lo schema DB è già multi-utente, l'interfaccia no.
+**Stato: in uso reale. Multi-utente con registrazione libera.**
+Chiunque può creare un account dalla schermata di accesso. Ogni utente vede solo i propri
+dati: tutte le action tranne `login` e `register` passano da `requireLogin()`, e ogni
+scrittura verifica la proprietà della riga prima di toccarla.
 
 Il valore dell'app sta nello **storico dei carichi**: è l'unico dato non ricostruibile.
 Ogni decisione di design deve proteggere quello storico.
@@ -109,8 +111,28 @@ sparisce davvero, via `purge_expired()`, chiamata al login e all'apertura dell'e
 La cancellazione definitiva non intacca lo storico, per costruzione: FK in `SET NULL`,
 nome e target denormalizzati dentro il log, e fallback per nome nel lookup dell'ultimo peso.
 
+### Freno ai tentativi di accesso
+
+`login_attempts` è una tabella di servizio, **non uno storico**: le righe si cancellano
+senza problemi. Chiave `(ip, username)`.
+
+- Ogni fallimento incrementa il contatore; il ritardo è `min(fallimenti, 5)` secondi.
+- Oltre 10 fallimenti si risponde **subito**, senza dormire: continuare ad allungare
+  l'attesa terrebbe occupati i worker PHP, ed è proprio la leva per mettere giù il server.
+  **Il tetto al ritardo non è un dettaglio, è una difesa.**
+- Al login riuscito la riga si cancella; i tentativi scadono dopo 15 minuti (pulizia pigra,
+  niente cron), altrimenti un errore di battitura costerebbe un secondo in più per sempre.
+- La chiave include l'IP di proposito: con la sola username chiunque potrebbe rallentare
+  l'accesso altrui sbagliando apposta col nome di un altro. L'IP è preso **solo** da
+  `REMOTE_ADDR`: `X-Forwarded-For` lo scrive il client, fidarsene renderebbe il freno
+  aggirabile.
+
 ### Altro
 
+- ⚠️ **Orologi disallineati**: qui PHP gira su **UTC** e MySQL sull'**ora locale**, due ore di
+  scarto. Non confrontare mai un istante calcolato in PHP con un `NOW()` scritto dal
+  database: i confronti temporali vanno fatti **dentro la query** (`TIMESTAMPDIFF`,
+  `INTERVAL`). Sbagliarlo non dà errore, semplicemente non seleziona niente.
 - La colonna `share_code` esiste già in `workouts`, ma **non ha nessuna UI**. Non implementarla.
 - `exercises.rest_seconds` c'è ed è usato: il timer di recupero è una funzione di v1.
 - `exercises.url` è un link esplicativo (immagine, video, pagina). Accetta **solo http/https**:
@@ -135,7 +157,11 @@ Non sono suggerimenti.
 4. Cookie di sessione: `HttpOnly`, `Secure`, `SameSite=Strict`. Impostati con
    `session_set_cookie_params()` **prima** di `session_start()`.
 5. `session_regenerate_id(true)` al login.
-6. Ogni action di `api.php` chiama `requireLogin()` come prima istruzione. **Unica eccezione: `login`.**
+6. Ogni action di `api.php` chiama `requireLogin()` come prima istruzione. **Uniche
+   eccezioni: `login` e `register`**, che sono i due endpoint non autenticati esposti a
+   internet. Il messaggio d'errore del login è volutamente generico: non rivela se lo
+   username esiste. Il login ha un **freno progressivo** (vedi punto 4), `register`
+   aspetta 1 secondo fisso sui fallimenti.
 7. Ogni query filtra su `user_id` preso **dalla sessione**, mai da un parametro della richiesta.
    Un ID che arriva dal client non autorizza mai niente.
 8. Output HTML sempre attraverso `htmlspecialchars($s, ENT_QUOTES, 'UTF-8')`.
@@ -159,13 +185,14 @@ Header `Content-Type: application/json; charset=utf-8`. Codice HTTP 200 anche su
 applicativi (il client legge `ok`); 401 solo per sessione scaduta, così il client sa che deve
 rimandare al login.
 
-**Le action sono 16. Non aggiungerne altre senza chiedere.**
+**Le action sono 17. Non aggiungerne altre senza chiedere.**
 
 *Sessione e allenamento*
 
 | action | input | output |
 |---|---|---|
-| `login` | `word1`, `word2` | utente + schede (vive e in cestino) |
+| `register` | `username`, `word1`, `word2` | crea l'utente **e lo lascia loggato** (senza `requireLogin`) |
+| `login` | `username`, `word1`, `word2` | utente + schede (vive e in cestino) |
 | `get_workout` | `workout_id` | **apre una sessione** e ritorna scheda, esercizi, ultimo peso e serie dell'ultima volta |
 | `log_set` | `client_uid`, `workout_log_id`, `exercise_id`, `set_number`, `weight_kg`, `reps_completed` | esito (idempotente) |
 | `delete_set` | `client_uid` | annulla una serie della **sessione in corso** (idempotente; su sessione chiusa non fa nulla) |
@@ -198,6 +225,12 @@ genererebbe un log fantasma a ogni apertura.
 
 Il **logout non è un'action**: è gestito da `index.php?logout=1`, perché la sessione è
 roba della shell, non un dato dell'app.
+
+**Credenziali**: username + due parole in caselle separate. Lo username è normalizzato in
+minuscolo (`Fabio` e `fabio` sono lo stesso account) e la passphrase è le due parole unite
+da uno spazio, trim + lowercase. Regole in `credentials_error()`, in un posto solo, usate
+sia dal login sia dalla registrazione. **Lo username è obbligatorio**: senza, la passphrase
+sarebbe l'identità e due utenti con le stesse due parole si scambierebbero l'account.
 
 ---
 
@@ -258,17 +291,20 @@ rete, non da due tap umani.
 
 Non implementare, non proporre, non "predisporre" con codice morto:
 
-- Registrazione automatica di nuovi utenti dal login
 - Share code, import e clonazione schede
 - Vista a calendario (lo storico è una lista cronologica inversa)
 - Grafici, statistiche, PR, badge, gamification
 
 Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 
-> **CRUD delle schede**, **alternative agli esercizi** ed **esercizi a tempo** erano fuori
-> scope in v1: sono stati implementati dopo, su richiesta esplicita e in quest'ordine —
-> prima le alternative (nate da un problema emerso in palestra), poi il CRUD, infine il
-> ramo `time` insieme all'annulla-serie e alla gestione del pool alternative.
+> **CRUD delle schede**, **alternative agli esercizi**, **esercizi a tempo** e
+> **registrazione utenti** erano fuori scope in v1: sono stati implementati dopo, su
+> richiesta esplicita e in quest'ordine — prima le alternative (nate da un problema emerso
+> in palestra), poi il CRUD, poi il ramo `time` con l'annulla-serie e la gestione del pool
+> alternative, infine il multi-utente (passo preparatorio allo share code).
+>
+> ⚠️ La registrazione è aperta ma **mancano i termini d'uso e le condizioni**: vanno scritti
+> prima di pubblicizzare l'app.
 
 ---
 

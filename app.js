@@ -42,10 +42,19 @@ const $ = (sel) => document.querySelector(sel);
 
 const els = {
     loginForm:   $('#login-form'),
+    username:    $('#login-username'),
     word1:       $('#login-word1'),
     word2:       $('#login-word2'),
     loginError:  $('#login-error'),
     loginSubmit: $('#login-submit'),
+    registerForm: $('#register-form'),
+    regUsername: $('#reg-username'),
+    regWord1:    $('#reg-word1'),
+    regWord2:    $('#reg-word2'),
+    regError:    $('#reg-error'),
+    regSubmit:   $('#reg-submit'),
+    showRegister: $('#show-register'),
+    showLogin:   $('#show-login'),
     logoutBtn:   $('#logout-btn'),
     queueInd:    $('#queue-indicator'),
     home:        $('#home-view'),
@@ -451,6 +460,7 @@ async function handleLogin(e) {
 
     try {
         const res = await api('login', {
+            username: els.username.value,
             word1: els.word1.value,
             word2: els.word2.value,
         });
@@ -470,6 +480,46 @@ async function handleLogin(e) {
     } finally {
         els.loginSubmit.disabled = false;
     }
+}
+
+
+// Registrazione: stessa meccanica del login, e al successo si e' gia' dentro
+// (il server apre la sessione), quindi si entra direttamente nell'app vuota.
+async function handleRegister(e) {
+    e.preventDefault();
+    els.regError.hidden = true;
+    els.regSubmit.disabled = true;
+
+    try {
+        const res = await api('register', {
+            username: els.regUsername.value,
+            word1: els.regWord1.value,
+            word2: els.regWord2.value,
+        });
+        if (res.ok) {
+            window.GHISA.loggedIn = true;
+            applyWorkoutsPayload(res.data);
+            showApp(true);
+            renderHome();
+            showScreen('home');
+        } else {
+            els.regError.textContent = res.error || 'Registrazione non riuscita';
+            els.regError.hidden = false;
+        }
+    } catch (err) {
+        els.regError.textContent = 'Errore di rete. Riprova.';
+        els.regError.hidden = false;
+    } finally {
+        els.regSubmit.disabled = false;
+    }
+}
+
+// Mostra login o registrazione (sono due form nella stessa schermata).
+function showRegisterForm(show) {
+    els.loginForm.hidden = show;
+    els.registerForm.hidden = !show;
+    els.loginError.hidden = true;
+    els.regError.hidden = true;
 }
 
 
@@ -2130,6 +2180,13 @@ function init() {
     updateQueueIndicator();
 
     if (els.loginForm) els.loginForm.addEventListener('submit', handleLogin);
+    if (els.registerForm) els.registerForm.addEventListener('submit', handleRegister);
+    if (els.showRegister) {
+        els.showRegister.addEventListener('click', () => showRegisterForm(true));
+    }
+    if (els.showLogin) {
+        els.showLogin.addEventListener('click', () => showRegisterForm(false));
+    }
     if (els.logoutBtn) {
         els.logoutBtn.addEventListener('click', () => {
             location.href = 'index.php?logout=1';

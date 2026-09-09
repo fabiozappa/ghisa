@@ -73,6 +73,12 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
         <h1 class="brand">Ghisa</h1>
         <form id="login-form" autocomplete="off">
             <label>
+                Nome utente
+                <input id="login-username" name="username" type="text"
+                       inputmode="text" autocapitalize="none"
+                       autocomplete="username" required>
+            </label>
+            <label>
                 Prima parola
                 <input id="login-word1" name="word1" type="text"
                        inputmode="text" autocapitalize="none"
@@ -86,7 +92,42 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             </label>
             <button type="submit" id="login-submit">Entra</button>
             <p id="login-error" class="error" role="alert" hidden></p>
+            <button type="button" id="show-register" class="link">
+                Non hai un account? Registrati
+            </button>
         </form>
+
+        <!-- Registrazione: stessa forma del login, con in piu' la creazione. -->
+        <form id="register-form" autocomplete="off" hidden>
+            <label>
+                Nome utente
+                <input id="reg-username" name="username" type="text"
+                       inputmode="text" autocapitalize="none"
+                       autocomplete="username" required>
+            </label>
+            <label>
+                Prima parola
+                <input id="reg-word1" name="word1" type="text"
+                       inputmode="text" autocapitalize="none"
+                       autocomplete="off" required>
+            </label>
+            <label>
+                Seconda parola
+                <input id="reg-word2" name="word2" type="text"
+                       inputmode="text" autocapitalize="none"
+                       autocomplete="off" required>
+            </label>
+            <p class="reg-hint">
+                Due parole che ricordi facilmente, almeno 3 lettere ciascuna.
+                Serviranno per entrare, insieme al nome utente.
+            </p>
+            <button type="submit" id="reg-submit">Crea account</button>
+            <p id="reg-error" class="error" role="alert" hidden></p>
+            <button type="button" id="show-login" class="link">
+                Hai gia' un account? Entra
+            </button>
+        </form>
+
     </main>
 
     <!-- Vista app: contenitore riempito da app.js. -->

@@ -12,6 +12,7 @@
 --  - Indice su workout_logs(user_id, started_at) per lo storico.
 
 -- I DROP vanno dal figlio al padre per non violare le foreign key.
+DROP TABLE IF EXISTS login_attempts;
 DROP TABLE IF EXISTS exercise_logs;
 DROP TABLE IF EXISTS workout_logs;
 DROP TABLE IF EXISTS exercises;
@@ -134,4 +135,24 @@ CREATE TABLE exercise_logs (
     -- SET NULL: l'esercizio può sparire, la serie registrata no.
     CONSTRAINT fk_exercise_logs_exercise FOREIGN KEY (exercise_id)
         REFERENCES exercises (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------------
+-- login_attempts — freno ai tentativi di accesso. NON è uno storico: sono
+-- righe di servizio, si cancellano senza problemi (al login riuscito e dopo
+-- 15 minuti di silenzio).
+--
+-- Chiave (ip, username): con la sola username chiunque potrebbe rallentare
+-- l'accesso altrui sbagliando apposta col nome di un altro.
+-- ---------------------------------------------------------------------------
+CREATE TABLE login_attempts (
+    id             INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+    ip             VARCHAR(45)       NOT NULL,          -- 45 caratteri: ci sta anche IPv6
+    username       VARCHAR(50)       NOT NULL,          -- normalizzato in minuscolo
+    failures       SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    last_failed_at DATETIME          NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_login_attempts (ip, username),
+    KEY idx_login_attempts_time (last_failed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
