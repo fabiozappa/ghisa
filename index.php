@@ -121,6 +121,13 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
                 Due parole che ricordi facilmente, almeno 3 lettere ciascuna.
                 Serviranno per entrare, insieme al nome utente.
             </p>
+            <p class="reg-hint">
+                Creando un account accetti i
+                <a href="terms-it.html" target="_blank" rel="noopener">Termini d'uso</a>
+                (<a href="terms-en.html" target="_blank" rel="noopener">English</a>).
+                Il servizio è fornito così com'è: nessuna garanzia, nessun backup,
+                nessuna assistenza.
+            </p>
             <button type="submit" id="reg-submit">Crea account</button>
             <p id="reg-error" class="error" role="alert" hidden></p>
             <button type="button" id="show-login" class="link">

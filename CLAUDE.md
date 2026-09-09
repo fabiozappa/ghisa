@@ -45,6 +45,8 @@ schema.sql         schema completo del database
 app.js             player, coda offline, wake lock, alternative, editor, chiamate API
 style.css
 public_workout.php pagina pubblica di una scheda condivisa (SENZA login)
+terms-it.html      termini d'uso (italiano) — statici, linkati dalla registrazione
+terms-en.html      termini d'uso (inglese), traduzione di cortesia
 sw.js              service worker (solo cache asset statici)
 manifest.json
 /icons/            icone PWA
@@ -331,8 +333,19 @@ Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 > in palestra), poi il CRUD, poi il ramo `time` con l'annulla-serie e la gestione del pool
 > alternative, poi il multi-utente, infine lo **share code con pagina pubblica e import**.
 >
-> ⚠️ La registrazione è aperta ma **mancano i termini d'uso e le condizioni**: vanno scritti
-> prima di pubblicizzare l'app.
+> I **termini d'uso** ci sono (`terms-it.html` / `terms-en.html`), linkati dal form di
+> registrazione: creare un account vale come accettazione.
+>
+> ⚠️ **Manca ancora la privacy policy.** I termini non possono derogare al GDPR: con la
+> registrazione aperta si trattano dati personali di utenti europei, che mantengono i
+> diritti di accesso e cancellazione qualunque cosa dicano i termini. Serve un documento
+> separato che dica quali dati si raccolgono, perché, per quanto tempo e come esercitare
+> quei diritti.
+>
+> Nota sui termini: sono scritti duri ma con la formula "nei limiti massimi consentiti
+> dalla legge". Un'esclusione totale di responsabilità sarebbe **nulla** per dolo e colpa
+> grave (art. 1229 c.c.) e rischierebbe di far cadere l'intera clausola. Non "ammorbidirli"
+> togliendo quella formula: è ciò che li tiene in piedi.
 
 ---
 

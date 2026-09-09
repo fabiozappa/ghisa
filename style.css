@@ -534,3 +534,28 @@ a.big { text-decoration: none; }
     word-break: break-all;
     margin: 0 0 10px;
 }
+
+/* --- Pagine legali (termini d'uso) --------------------------------------- */
+.legal { max-width: 720px; line-height: 1.6; }
+.legal h1 { font-size: 1.7rem; margin-bottom: 4px; }
+.legal h2 {
+    font-size: 1.05rem;
+    margin: 28px 0 8px;
+    color: var(--accent);
+}
+.legal p { margin: 0 0 12px; color: #ddd; }
+.legal strong { color: #fff; }
+.legal-date, .legal-lang { color: var(--muted); font-size: 0.9rem; }
+.legal-lang { margin-bottom: 20px; }
+.legal-note {
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+}
+.legal a { color: var(--accent); }
+.legal-back {
+    border-top: 1px solid #2a2a2d;
+    padding-top: 16px;
+    margin-top: 32px;
+}
