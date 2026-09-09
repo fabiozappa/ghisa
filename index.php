@@ -21,7 +21,9 @@ $logged = is_logged_in();
 
 $workouts = [];
 $deleted_workouts = [];
+$username = '';
 if ($logged) {
+    $username = (string) db_value("SELECT username FROM users WHERE id = ?", [current_user_id()]);
     $workouts = db_all(
         "SELECT w.id, w.name, w.position,
                 (SELECT MAX(wl.finished_at)
@@ -124,6 +126,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             <p class="reg-hint">
                 Creando un account accetti i
                 <a href="terms-it.html" target="_blank" rel="noopener">Termini d'uso</a>
+                e la <a href="privacy-it.html" target="_blank" rel="noopener">Privacy</a>
                 (<a href="terms-en.html" target="_blank" rel="noopener">English</a>).
                 Il servizio è fornito così com'è: nessuna garanzia, nessun backup,
                 nessuna assistenza.
@@ -160,6 +163,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
         // Stato iniziale iniettato dal server. Le schede ci sono solo se loggato.
         window.GHISA = {
             loggedIn: <?= $logged ? 'true' : 'false' ?>,
+            username: <?= json_encode($username, $json_flags) ?>,
             workouts: <?= json_encode($workouts, $json_flags) ?>,
             deleted_workouts: <?= json_encode($deleted_workouts, $json_flags) ?>
         };

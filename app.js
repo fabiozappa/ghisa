@@ -69,6 +69,7 @@ let summaryView = null;
 let finishView = null;
 let altView = null;
 let editView = null;
+let accountView = null;
 
 // Stato della home: modalità gestione e cestino schede aperto.
 let homeEditMode = false;
@@ -436,6 +437,7 @@ function showScreen(name) {
     if (finishView) finishView.hidden = name !== 'finish';
     if (altView) altView.hidden = name !== 'alt';
     if (editView) editView.hidden = name !== 'edit';
+    if (accountView) accountView.hidden = name !== 'account';
 }
 
 // Riallinea l'elenco schede (vive + cestino) da una risposta del server.
@@ -467,6 +469,7 @@ async function handleLogin(e) {
         });
         if (res.ok) {
             window.GHISA.loggedIn = true;
+            window.GHISA.username = res.data.username || '';
             applyWorkoutsPayload(res.data);
             showApp(true);
             renderHome();
@@ -500,6 +503,7 @@ async function handleRegister(e) {
         });
         if (res.ok) {
             window.GHISA.loggedIn = true;
+            window.GHISA.username = res.data.username || '';
             applyWorkoutsPayload(res.data);
             showApp(true);
             renderHome();
@@ -599,6 +603,12 @@ function renderHome() {
         histBtn.textContent = 'Storico allenamenti';
         histBtn.addEventListener('click', openHistory);
         els.home.appendChild(histBtn);
+
+        const acc = document.createElement('button');
+        acc.className = 'link';
+        acc.textContent = 'Account';
+        acc.addEventListener('click', openAccount);
+        els.home.appendChild(acc);
 
         const manage = document.createElement('button');
         manage.className = 'link';
@@ -2181,6 +2191,110 @@ async function restoreExercise(id) {
         if (res.ok) {
             toast('Ripristinato');
             await reloadEditor();
+        } else {
+            toast(res.error || 'Errore.');
+        }
+    } catch (e) {
+        toast('Serve la rete.');
+    }
+}
+
+
+// ===========================================================================
+// Account
+// ===========================================================================
+
+function openAccount() {
+    if (!accountView) {
+        accountView = document.createElement('section');
+        accountView.id = 'account-view';
+        accountView.className = 'screen';
+        $('#app-view').appendChild(accountView);
+    }
+    accountView.textContent = '';
+
+    const h = document.createElement('h2');
+    h.textContent = 'Account';
+    accountView.appendChild(h);
+
+    const who = document.createElement('p');
+    who.textContent = 'Sei entrato come ';
+    const strong = document.createElement('strong');
+    strong.textContent = window.GHISA.username || '—';
+    who.appendChild(strong);
+    accountView.appendChild(who);
+
+    // Senza email non esiste un "password dimenticata": va detto qui, dove
+    // l'utente può ancora leggere il proprio nome utente.
+    const warn = document.createElement('p');
+    warn.className = 'alt-for';
+    warn.textContent = 'Non chiediamo email né altri dati personali. Per questo le '
+        + 'credenziali NON sono recuperabili: se dimentichi il nome utente o le due '
+        + 'parole, l\'account e i suoi dati non sono più raggiungibili da nessuno. '
+        + 'Annotale in un posto sicuro.';
+    accountView.appendChild(warn);
+
+    const docs = document.createElement('p');
+    docs.innerHTML = '<a href="terms-it.html" target="_blank" rel="noopener">Termini d\'uso</a>'
+        + ' · <a href="privacy-it.html" target="_blank" rel="noopener">Privacy</a>';
+    accountView.appendChild(docs);
+
+    // --- Zona pericolosa ---
+    const dz = document.createElement('div');
+    dz.className = 'danger-zone';
+
+    const dh = document.createElement('h3');
+    dh.className = 'exlist-title';
+    dh.textContent = 'Elimina account';
+    dz.appendChild(dh);
+
+    const dp = document.createElement('p');
+    dp.textContent = 'Cancella definitivamente l\'account e tutto ciò che contiene: '
+        + 'schede, esercizi e storico degli allenamenti. Non è recuperabile. '
+        + 'Le schede che altri hanno importato restano loro.';
+    dz.appendChild(dp);
+
+    const w1 = altField('Prima parola', 'text');
+    const w2 = altField('Seconda parola', 'text');
+    dz.appendChild(w1.label);
+    dz.appendChild(w2.label);
+
+    const del = document.createElement('button');
+    del.className = 'big danger-btn';
+    del.textContent = 'Elimina definitivamente';
+    del.addEventListener('click', () => deleteAccount(w1.input.value, w2.input.value));
+    dz.appendChild(del);
+
+    accountView.appendChild(dz);
+
+    const back = document.createElement('button');
+    back.className = 'link';
+    back.textContent = '← Home';
+    back.addEventListener('click', () => {
+        renderHome();
+        showScreen('home');
+    });
+    accountView.appendChild(back);
+
+    showScreen('account');
+}
+
+async function deleteAccount(word1, word2) {
+    if (!word1.trim() || !word2.trim()) {
+        toast('Inserisci le due parole per confermare.');
+        return;
+    }
+    const ok = confirm('Eliminare definitivamente l\'account?\n\n'
+        + 'Spariscono schede, esercizi e tutto lo storico. '
+        + 'Non si può annullare e non si può recuperare.');
+    if (!ok) return;
+
+    try {
+        const res = await api('delete_account', { word1, word2 });
+        if (res.ok) {
+            // La sessione è già chiusa dal server: si riparte dal login.
+            localStorage.clear();
+            location.href = 'index.php';
         } else {
             toast(res.error || 'Errore.');
         }

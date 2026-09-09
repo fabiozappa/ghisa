@@ -47,6 +47,8 @@ style.css
 public_workout.php pagina pubblica di una scheda condivisa (SENZA login)
 terms-it.html      termini d'uso (italiano) — statici, linkati dalla registrazione
 terms-en.html      termini d'uso (inglese), traduzione di cortesia
+privacy-it.html    informativa privacy (italiano)
+privacy-en.html    informativa privacy (inglese), traduzione di cortesia
 sw.js              service worker (solo cache asset statici)
 manifest.json
 /icons/            icone PWA
@@ -113,6 +115,19 @@ sparisce davvero, via `purge_expired()`, chiamata al login e all'apertura dell'e
 
 La cancellazione definitiva non intacca lo storico, per costruzione: FK in `SET NULL`,
 nome e target denormalizzati dentro il log, e fallback per nome nel lookup dell'ultimo peso.
+
+### Cancellare un account
+
+L'utente si cancella da solo (`delete_account`, schermata Account), previa **conferma con
+le due parole**: una sessione lasciata aperta sul telefono non deve bastare.
+
+⚠️ **L'ordine di cancellazione è imposto dai vincoli**, non è una preferenza stilistica:
+`workout_logs.user_id` ed `exercise_logs.workout_log_id` sono in `ON DELETE RESTRICT`
+proprio perché lo storico non sparisca per sbaglio. Quindi si smonta a mano, in
+transazione: serie → sessioni → schede (esercizi e alternative seguono in CASCADE) →
+tentativi di accesso → utente. Saltare un passo fa fallire l'intera cancellazione.
+
+Le schede che altri hanno importato **restano loro**: sono righe indipendenti.
 
 ### Freno ai tentativi di accesso
 
@@ -192,7 +207,7 @@ Header `Content-Type: application/json; charset=utf-8`. Codice HTTP 200 anche su
 applicativi (il client legge `ok`); 401 solo per sessione scaduta, così il client sa che deve
 rimandare al login.
 
-**Le action sono 19. Non aggiungerne altre senza chiedere.**
+**Le action sono 20. Non aggiungerne altre senza chiedere.**
 
 *Sessione e allenamento*
 
@@ -206,6 +221,7 @@ rimandare al login.
 | `finish_workout` | `workout_log_id`, `notes` | riepilogo testuale generato, **nota inclusa** (finisce anche nel testo copiato) |
 | `cancel_workout` | `workout_log_id` | scarta la sessione: cancellazione **fisica** di log e serie |
 | `get_history` | `limit`, `offset` | lista sessioni con dettaglio |
+| `delete_account` | `word1`, `word2` | cancella utente e tutti i suoi dati; richiede la **riconferma della passphrase** |
 
 *Alternative*
 
@@ -336,11 +352,18 @@ Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 > I **termini d'uso** ci sono (`terms-it.html` / `terms-en.html`), linkati dal form di
 > registrazione: creare un account vale come accettazione.
 >
-> ⚠️ **Manca ancora la privacy policy.** I termini non possono derogare al GDPR: con la
-> registrazione aperta si trattano dati personali di utenti europei, che mantengono i
-> diritti di accesso e cancellazione qualunque cosa dicano i termini. Serve un documento
-> separato che dica quali dati si raccolgono, perché, per quanto tempo e come esercitare
-> quei diritti.
+> La **privacy policy** c'è (`privacy-it.html` / `privacy-en.html`) e descrive il
+> trattamento reale: nessuna email, IP conservato 15 minuti sui soli accessi falliti,
+> cestino a 30 giorni, cancellazione self-service immediata.
+
+> ⚠️ **Le affermazioni di quei documenti sono verificabili nel codice: se cambi il
+> comportamento, aggiorna anche loro.** In particolare i 30 giorni del cestino, i 15
+> minuti dei tentativi, "nessuna chiamata a servizi esterni" e "la pagina condivisa non
+> mostra pesi né storico".
+>
+> Restano da completare i **segnaposti**: titolare del trattamento, indirizzo di contatto
+> (in tutti e quattro i documenti) e la **durata di conservazione dei backup**, che è
+> l'unico punto in cui la cancellazione non è istantanea.
 >
 > Nota sui termini: sono scritti duri ma con la formula "nei limiti massimi consentiti
 > dalla legge". Un'esclusione totale di responsabilità sarebbe **nulla** per dolo e colpa

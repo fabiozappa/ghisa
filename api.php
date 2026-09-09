@@ -314,7 +314,7 @@ try {
             }
 
             respond_ok(array_merge(
-                ['user_id' => $result],
+                ['user_id' => $result, 'username' => normalize_username($_POST['username'] ?? '')],
                 workouts_payload($result)
             ));
             break;
@@ -352,9 +352,48 @@ try {
             purge_expired($user_id);
 
             respond_ok(array_merge(
-                ['user_id' => $user_id],
+                ['user_id' => $user_id, 'username' => normalize_username($username)],
                 workouts_payload($user_id)
             ));
+            break;
+        }
+
+        // -- delete_account: cancella l'utente e TUTTO cio' che lo riguarda ---
+        case 'delete_account': {
+            $user_id = requireLogin();
+
+            // Ri-autenticazione: l'operazione è irreversibile e totale.
+            if (!verify_passphrase($user_id, $_POST['word1'] ?? '', $_POST['word2'] ?? '')) {
+                sleep(1);
+                respond_err('Le due parole non corrispondono');
+            }
+
+            $username = (string) db_value("SELECT username FROM users WHERE id = ?", [$user_id]);
+
+            // L'ordine è imposto dai vincoli: i log hanno le FK in RESTRICT
+            // verso utente e sessione proprio per non sparire per sbaglio.
+            // Qui la cancellazione è voluta, quindi si smontano nell'ordine.
+            db()->beginTransaction();
+            try {
+                db_run(
+                    "DELETE el FROM exercise_logs el
+                       JOIN workout_logs wl ON wl.id = el.workout_log_id
+                      WHERE wl.user_id = ?",
+                    [$user_id]
+                );
+                db_run("DELETE FROM workout_logs WHERE user_id = ?", [$user_id]);
+                // esercizi e alternative se ne vanno in CASCADE con le schede
+                db_run("DELETE FROM workouts WHERE user_id = ?", [$user_id]);
+                db_run("DELETE FROM login_attempts WHERE username = ?", [$username]);
+                db_run("DELETE FROM users WHERE id = ?", [$user_id]);
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
+            }
+
+            logout();
+            respond_ok();
             break;
         }
 

@@ -168,6 +168,18 @@ function login(string $username, string $word1, string $word2): ?int
     return (int) $user['id'];
 }
 
+// Verifica la passphrase di un utente già loggato, senza toccare la sessione.
+// Serve prima delle operazioni irreversibili: una sessione lasciata aperta sul
+// telefono non deve bastare a cancellare tutto.
+function verify_passphrase(int $user_id, string $word1, string $word2): bool
+{
+    $hash = db_value("SELECT password_hash FROM users WHERE id = ?", [$user_id]);
+    if ($hash === null) {
+        return false;
+    }
+    return password_verify(normalize_passphrase($word1, $word2), (string) $hash);
+}
+
 // Crea un utente e lo lascia loggato. Ritorna l'id, oppure il messaggio
 // d'errore in caso di problema (username già preso, credenziali non valide).
 function register_user(string $username, string $word1, string $word2)

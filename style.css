@@ -24,6 +24,9 @@ body {
 [hidden] { display: none !important; }
 
 h1, h2 { margin: 0 0 0.6em; font-weight: 700; }
+
+/* Regola generale: senza, un <a> senza classe esce blu di default. */
+a { color: var(--accent); }
 h2 { font-size: 1.25rem; }
 
 .error { color: #ff6b6b; font-weight: 600; }
@@ -559,3 +562,22 @@ a.big { text-decoration: none; }
     padding-top: 16px;
     margin-top: 32px;
 }
+
+/* Zona pericolosa: deve sembrare pericolosa. */
+.danger-zone {
+    border: 2px solid #5a2020;
+    border-radius: 14px;
+    padding: 14px;
+    margin: 24px 0;
+    background: #1a1414;
+}
+.danger-zone p { color: #e8c8c8; font-size: 0.95rem; }
+.big.danger-btn {
+    background: #a11f1f;
+    border-color: #a11f1f;
+    color: #fff;
+}
+
+/* Elenchi nelle pagine legali. */
+.legal-list { color: #ddd; padding-left: 1.3em; margin: 0 0 12px; }
+.legal-list li { margin-bottom: 8px; }
