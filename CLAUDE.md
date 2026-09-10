@@ -41,6 +41,9 @@ api.php            front controller: switch su $_POST['action'], risponde SEMPRE
 db.php             connessione PDO + helper di query
 auth.php           sessione, login, logout, requireLogin()
 config.php         credenziali DB — NON versionato (.gitignore), uno per ambiente
+config-example.php modello da copiare in config.php
+README.md          installazione, aggiornamento e panoramica del progetto
+LICENSE            MIT — copre il codice, non il servizio ospitato
 schema.sql         schema completo del database
 app.js             player, coda offline, wake lock, alternative, editor, chiamate API
 style.css
