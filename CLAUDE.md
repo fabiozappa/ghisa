@@ -364,9 +364,10 @@ Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 > minuti dei tentativi, "nessuna chiamata a servizi esterni" e "la pagina condivisa non
 > mostra pesi né storico".
 >
-> Restano da completare i **segnaposti**: titolare del trattamento, indirizzo di contatto
-> (in tutti e quattro i documenti) e la **durata di conservazione dei backup**, che è
-> l'unico punto in cui la cancellazione non è istantanea.
+> I **segnaposti** — titolare del trattamento, indirizzo di contatto (in tutti e quattro i
+> documenti) e **durata di conservazione dei backup** — sono lasciati vuoti **di proposito**:
+> li compila chi pubblica un'istanza, e il README lo dice. **Non riempirli con dati
+> inventati o presunti.**
 >
 > Nota sui termini: sono scritti duri ma con la formula "nei limiti massimi consentiti
 > dalla legge". Un'esclusione totale di responsabilità sarebbe **nulla** per dolo e colpa
@@ -408,8 +409,10 @@ Per una prova rapida va bene anche `php -S 127.0.0.1:8765` dalla root del proget
 
 ### Produzione
 
-**`https://ghisa.fabiozappa.it`**, aggiornata a mano **via FTP**. Il passaggio a git è
-previsto ma non ancora fatto.
+**`https://ghisa.fabiozappa.it`**, aggiornata **via git**: `git pull` da terminale sul
+server. Il repository (`fabiozappa/ghisa`) è **pubblico**, con licenza MIT.
+
+Backup del database presente e **ripristino provato** a mano.
 
 ### Regole di deploy — leggile prima di toccare il server
 
@@ -422,8 +425,13 @@ previsto ma non ancora fatto.
    rilanciabile (`#1060` se la colonna c'è già). Ogni volta che cambia `schema.sql`,
    serve la ALTER corrispondente.
 3. **Non sovrascrivere `config.php`**: il server ha il suo, con credenziali diverse.
+   `git pull` non lo tocca perché è in `.gitignore`: **non toglierlo da lì** e non
+   forzarlo nel repository con `git add -f`, o le credenziali finirebbero su GitHub.
 4. Gli asset si invalidano da soli (`?v=<data del file>` messo da `index.php` + service
    worker rete-per-prima): **non serve toccare il nome della cache** a ogni deploy.
    Cambialo solo se cambi la struttura di ciò che viene messo in cache.
 5. `display_errors = Off`. Gli errori si loggano, non si stampano.
 6. Lo storico vive lì: verifica che ci sia un **backup del database**.
+7. Il sito è un clone del repository, quindi **`.git/` deve restare irraggiungibile dal
+   web** (oggi risponde 403). Che `schema.sql` o questo file si leggano dal browser invece
+   non espone nulla: sono già pubblici su GitHub.

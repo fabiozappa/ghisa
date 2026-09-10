@@ -43,9 +43,13 @@ I file vanno sul server e funzionano.
 
 ## Installazione
 
-### 1. Copia i file
+### 1. Scarica il codice
 
-Tutti i file nella document root del sito. La struttura è volutamente piatta.
+Clona il repository (o copia i file) nella document root del sito. La struttura è
+volutamente piatta.
+
+Se cloni direttamente nella document root, verifica che il web server **blocchi l'accesso
+a `.git/`**: altrimenti la cartella si scarica dal browser.
 
 ### 2. Crea il database
 
@@ -94,6 +98,33 @@ nessuno. Annotale.
 
 ---
 
+## Prima di aprirlo al pubblico
+
+Termini d'uso e informativa privacy descrivono il comportamento reale del codice, ma
+**alcuni campi sono lasciati vuoti di proposito**, segnati con *da indicare* /
+*to be provided*. Chi pubblica un'istanza usata da altri **deve compilarli**: il titolare
+del trattamento è chi gestisce il servizio, non l'autore del codice.
+
+| Campo | File |
+|---|---|
+| Titolare del trattamento | `privacy-it.html`, `privacy-en.html` |
+| Indirizzo di contatto | tutti e quattro i documenti |
+| Durata di conservazione dei backup | `privacy-it.html`, `privacy-en.html` |
+
+Per trovarli tutti:
+
+```bash
+grep -n "da indicare\|to be provided" terms-*.html privacy-*.html
+```
+
+La durata dei backup dipende dall'hosting: è l'unico punto in cui la cancellazione di un
+account non è istantanea, e va dichiarata per quello che è davvero.
+
+Se modifichi il comportamento dell'app, rileggi anche quei documenti: citano i 30 giorni
+del cestino, i 15 minuti dei tentativi di accesso e l'assenza di chiamate a servizi esterni.
+
+---
+
 ## Sviluppo in locale
 
 Per una prova rapida basta il server integrato di PHP, dalla cartella del progetto:
@@ -116,6 +147,7 @@ Per ripartire da zero con il database, rilancia `schema.sql` e registra di nuovo
    errore `#1064`. Quindi prima si verifica con `SHOW COLUMNS FROM tabella;` e poi si lancia
    la `ALTER` semplice.
 3. **Non sovrascrivere `config.php`**: sul server ce n'è uno con credenziali diverse.
+   Con `git pull` non succede, perché non è versionato; copiando i file a mano sì.
 4. Gli asset si invalidano da soli: `index.php` aggiunge a `style.css` e `app.js` un
    `?v=<data del file>`, e il service worker usa una strategia rete-per-prima. Non c'è
    nessun numero di versione da aggiornare a mano.
