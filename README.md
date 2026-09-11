@@ -162,6 +162,8 @@ Per ripartire da zero con il database, rilancia `schema.sql` e registra di nuovo
 | `api.php` | unico endpoint: riceve POST, risponde sempre JSON |
 | `db.php` | connessione PDO e helper di query |
 | `auth.php` | sessione, credenziali, freno ai tentativi di accesso |
+| `lang.php` | lingua della richiesta e funzione di traduzione `tr()` |
+| `lang-it.php`, `lang-en.php` | testi dell'interfaccia, un file per lingua |
 | `config.php` | credenziali del database — **non versionato** |
 | `config-example.php` | modello da copiare |
 | `schema.sql` | schema completo del database |

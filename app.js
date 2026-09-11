@@ -164,6 +164,21 @@ async function copyText(text) {
     }
 }
 
+// Traduce una chiave con il dizionario che index.php inietta in GHISA.strings,
+// già completo: le chiavi che mancano nella lingua scelta sono in italiano.
+// I segnaposto {nome} si sostituiscono con params. Una chiave inesistente
+// torna com'è, così si vede subito. Si chiama tr e non t perché in questo file
+// "t" è già una variabile locale in più punti, e lì nasconderebbe la funzione.
+function tr(key, params) {
+    const strings = (window.GHISA && window.GHISA.strings) || {};
+    let text = Object.prototype.hasOwnProperty.call(strings, key) ? strings[key] : key;
+    if (params) {
+        text = text.replace(/\{(\w+)\}/g, (match, name) =>
+            Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match);
+    }
+    return text;
+}
+
 // Avviso effimero in alto.
 function toast(msg) {
     let t = $('#toast');

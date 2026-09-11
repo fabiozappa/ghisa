@@ -7,6 +7,7 @@
 // Tutta la parte dinamica (player, storico) la costruisce app.js.
 
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/lang.php';
 session_boot();
 
 // Logout gestito qui, non come action API: la sessione è roba della shell.
@@ -14,6 +15,16 @@ session_boot();
 if (isset($_GET['logout'])) {
     logout();
     header('Location: index.php');
+    exit;
+}
+
+// Scelta manuale della lingua: si salva nel cookie e si torna all'URL pulito,
+// come per il logout. Gli altri parametri (es. ?import=) restano dove sono.
+if (isset($_GET['lang'])) {
+    lang_remember(is_string($_GET['lang']) ? $_GET['lang'] : '');
+    $query = $_GET;
+    unset($query['lang']);
+    header('Location: index.php' . ($query ? '?' . http_build_query($query) : ''));
     exit;
 }
 
@@ -58,7 +69,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
     | JSON_HEX_QUOT | JSON_HEX_AMP;
 ?>
 <!doctype html>
-<html lang="it">
+<html lang="<?= htmlspecialchars(lang_current(), ENT_QUOTES, 'UTF-8') ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -165,7 +176,11 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             loggedIn: <?= $logged ? 'true' : 'false' ?>,
             username: <?= json_encode($username, $json_flags) ?>,
             workouts: <?= json_encode($workouts, $json_flags) ?>,
-            deleted_workouts: <?= json_encode($deleted_workouts, $json_flags) ?>
+            deleted_workouts: <?= json_encode($deleted_workouts, $json_flags) ?>,
+            // Lingua e testi dell'interfaccia, già completi: dove manca una
+            // traduzione c'è l'italiano. Li legge tr() in app.js.
+            lang: <?= json_encode(lang_current(), $json_flags) ?>,
+            strings: <?= json_encode(lang_strings(), $json_flags | JSON_FORCE_OBJECT) ?>
         };
     </script>
     <script src="app.js?v=<?= $v_js ?>" defer></script>

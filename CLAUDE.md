@@ -40,6 +40,9 @@ index.php          login + guardia di sessione + logout + shell dell'app
 api.php            front controller: switch su $_POST['action'], risponde SEMPRE JSON
 db.php             connessione PDO + helper di query
 auth.php           sessione, login, logout, requireLogin()
+lang.php           lingua della richiesta (cookie → browser → italiano) + tr()
+lang-it.php        testi in italiano — lingua di riserva, ogni chiave deve esistere qui
+lang-en.php        testi in inglese
 config.php         credenziali DB — NON versionato (.gitignore), uno per ambiente
 config-example.php modello da copiare in config.php
 README.md          installazione, aggiornamento e panoramica del progetto
@@ -320,6 +323,32 @@ da ritirare. Per indicizzare davvero: togliere quel meta e valutare il JSON-LD.
 La query è riscritta lì invece di riusare `shared_workout_by_code()` di `api.php`, che è un
 front controller e non si può includere. Duplicazione voluta, non svista.
 
+### Lingue
+
+Italiano e inglese. ⚠️ **Migrazione in corso**: i testi si spostano dal codice ai file
+lingua un passo alla volta. Finché non è finita, convivono testi tradotti e testi ancora
+scritti nel codice.
+
+- Un file per lingua, `lang-<codice>.php`, che ritorna un array `chiave => testo`.
+  **L'italiano è la lingua di riserva**: ogni chiave deve esistere lì. Nelle altre lingue
+  una chiave mancante compare in italiano, mai come buco vuoto.
+- La lingua la decide `lang_current()`: cookie `GHISALANG` → `Accept-Language` → italiano.
+  La scelta manuale è `index.php?lang=en`, gestita come il logout: salva il cookie e
+  torna all'URL pulito, conservando gli altri parametri (`?import=`).
+- `index.php` inietta il dizionario **già completo** in `window.GHISA.strings`: nessuna
+  richiesta in più, e il service worker non c'entra.
+- In PHP e in JS la funzione si chiama **`tr()`, non `t()`**: in `app.js` `t` è già una
+  variabile locale in più punti e lì nasconderebbe la funzione.
+- **Mai comporre frasi concatenando pezzi tradotti.** Segnaposto `{n}`, `{name}` dentro il
+  testo: l'ordine delle parole cambia tra le lingue.
+- `tr()` **non fa escape**: in HTML il risultato passa comunque da `htmlspecialchars`, in JS
+  finisce in `textContent`.
+- Il cookie `GHISALANG` è `SameSite=Lax`, non Strict: chi apre un link condiviso arriva da
+  un altro sito, e con Strict il cookie non partirebbe. Contiene solo il codice lingua ed
+  è **dichiarato nella privacy**.
+- Non si traducono i dati dell'utente: nomi di schede ed esercizi, e il target dei log
+  (`3x10`, `3x45s`), che è già neutro.
+
 ### Interfaccia
 
 Tasti grandi, alto contrasto, pensati per mani sudate. L'input del peso è `type="number"`
@@ -361,8 +390,8 @@ Le colonne DB che servono a queste funzioni ci sono già. Basta quello.
 
 > ⚠️ **Le affermazioni di quei documenti sono verificabili nel codice: se cambi il
 > comportamento, aggiorna anche loro.** In particolare i 30 giorni del cestino, i 15
-> minuti dei tentativi, "nessuna chiamata a servizi esterni" e "la pagina condivisa non
-> mostra pesi né storico".
+> minuti dei tentativi, l'elenco dei cookie (solo sessione e lingua), "nessuna chiamata a
+> servizi esterni" e "la pagina condivisa non mostra pesi né storico".
 >
 > I **segnaposti** — titolare del trattamento, indirizzo di contatto (in tutti e quattro i
 > documenti) e **durata di conservazione dei backup** — sono lasciati vuoti **di proposito**:
