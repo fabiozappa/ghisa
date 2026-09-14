@@ -286,7 +286,7 @@ function build_summary(array $log, array $rows, ?string $notes = null): string
     // La nota chiude il riepilogo: così finisce anche nel testo copiato.
     if ($notes !== null && trim($notes) !== '') {
         $lines[] = '';
-        $lines[] = 'Nota: ' . trim($notes);
+        $lines[] = tr('summary.note', ['text' => trim($notes)]);
     }
 
     return implode("\n", $lines);
@@ -334,7 +334,7 @@ try {
             // allungare l'attesa terrebbe occupati i worker PHP, ed è proprio
             // la leva che userebbe chi vuole mettere giù il server.
             if ($failures >= LOGIN_HARD_LIMIT) {
-                respond_err('Troppi tentativi. Riprova fra qualche minuto.');
+                respond_err(tr('err.too_many_attempts'));
             }
 
             $user_id = login($username, $word1, $word2);
@@ -343,7 +343,7 @@ try {
                 // 1° errore 1 secondo, 2° 2 secondi... fino al tetto.
                 sleep(min($failures + 1, LOGIN_MAX_DELAY));
                 // Messaggio generico: non si rivela se lo username esiste.
-                respond_err('Credenziali non valide');
+                respond_err(tr('err.invalid_credentials'));
             }
 
             clear_login_failures($ip, $username);   // al successo si azzera
@@ -365,7 +365,7 @@ try {
             // Ri-autenticazione: l'operazione è irreversibile e totale.
             if (!verify_passphrase($user_id, $_POST['word1'] ?? '', $_POST['word2'] ?? '')) {
                 sleep(1);
-                respond_err('Le due parole non corrispondono');
+                respond_err(tr('err.words_mismatch'));
             }
 
             $username = (string) db_value("SELECT username FROM users WHERE id = ?", [$user_id]);
@@ -408,7 +408,7 @@ try {
                 [$workout_id, $user_id]
             );
             if ($workout === null) {
-                respond_err('Scheda non trovata');
+                respond_err(tr('err.workout_not_found'));
             }
 
             // Solo i titolari dello slot (alternative escluse), vivi, in ordine.
@@ -455,10 +455,10 @@ try {
                 ? (int) $_POST['reps_completed'] : null;
 
             if ($client_uid === '' || strlen($client_uid) > 36) {
-                respond_err('client_uid mancante o non valido');
+                respond_err(tr('err.client_uid_invalid'));
             }
             if ($set_number < 1) {
-                respond_err('set_number non valido');
+                respond_err(tr('err.set_number_invalid'));
             }
 
             // La sessione deve essere dell'utente corrente.
@@ -467,7 +467,7 @@ try {
                 [$workout_log_id, $user_id]
             );
             if ($log === null) {
-                respond_err('Sessione non trovata');
+                respond_err(tr('err.session_not_found'));
             }
 
             // Snapshot dell'anagrafica: nome e target dell'esercizio, verificando
@@ -481,7 +481,7 @@ try {
                 [$exercise_id, $user_id]
             );
             if ($ex === null) {
-                respond_err('Esercizio non trovato');
+                respond_err(tr('err.exercise_not_found'));
             }
             $target = build_target($ex['target_sets'], $ex['target_reps'], $ex['type']);
 
@@ -512,7 +512,7 @@ try {
             $user_id = requireLogin();
             $client_uid = trim((string) ($_POST['client_uid'] ?? ''));
             if ($client_uid === '') {
-                respond_err('client_uid mancante');
+                respond_err(tr('err.client_uid_missing'));
             }
 
             // Si può correggere solo la sessione che stai facendo: su una
@@ -546,7 +546,7 @@ try {
                 [$workout_log_id, $user_id]
             );
             if ($log === null) {
-                respond_err('Sessione non trovata');
+                respond_err(tr('err.session_not_found'));
             }
 
             // Chiude la sessione. Rieseguibile: aggiorna finished_at e note.
@@ -584,7 +584,7 @@ try {
                 [$workout_log_id, $user_id]
             );
             if ($log === null) {
-                respond_err('Sessione non trovata');
+                respond_err(tr('err.session_not_found'));
             }
 
             // Cancellazione FISICA (log + serie): è una sessione che l'utente
@@ -618,7 +618,7 @@ try {
                 [$exercise_id, $user_id]
             );
             if ($primary === null) {
-                respond_err('Esercizio non trovato');
+                respond_err(tr('err.exercise_not_found'));
             }
 
             $alts = db_all(
@@ -644,7 +644,7 @@ try {
             $name = trim((string) ($_POST['name'] ?? ''));
 
             if ($name === '') {
-                respond_err('Nome alternativa mancante');
+                respond_err(tr('err.alternative_name_missing'));
             }
 
             // Titolare dell'utente (e davvero un titolare): da qui eredito i default.
@@ -656,7 +656,7 @@ try {
                 [$primary_id, $user_id]
             );
             if ($primary === null) {
-                respond_err('Esercizio titolare non trovato');
+                respond_err(tr('err.primary_not_found'));
             }
 
             $target_sets = ($_POST['target_sets'] ?? '') === ''
@@ -668,7 +668,7 @@ try {
 
             $url = trim((string) ($_POST['url'] ?? ''));
             if ($url !== '' && !valid_url($url)) {
-                respond_err('URL non valido (usa http:// o https://)');
+                respond_err(tr('err.url_invalid'));
             }
             $url = $url === '' ? null : $url;
 
@@ -704,12 +704,12 @@ try {
                 [$alt_id, $user_id]
             );
             if ($alt === null) {
-                respond_err('Alternativa non trovata');
+                respond_err(tr('err.alternative_not_found'));
             }
             $primary_id = (int) $alt['alternative_of'];
             $primary = db_one("SELECT id, position FROM exercises WHERE id = ?", [$primary_id]);
             if ($primary === null) {
-                respond_err('Titolare non trovato');
+                respond_err(tr('err.primary_not_found'));
             }
 
             // Scambio dei ruoli nello slot, in transazione.
@@ -746,7 +746,7 @@ try {
                 [$workout_id, $user_id]
             );
             if ($workout === null) {
-                respond_err('Scheda non trovata');
+                respond_err(tr('err.workout_not_found'));
             }
 
             $exercises = db_all(
@@ -801,14 +801,14 @@ try {
             $name = trim((string) ($_POST['name'] ?? ''));
 
             if ($name === '') {
-                respond_err('Il nome non può essere vuoto');
+                respond_err(tr('err.name_empty'));
             }
 
             if ($workout_id > 0) {
                 $own = db_one("SELECT id FROM workouts WHERE id = ? AND user_id = ?",
                     [$workout_id, $user_id]);
                 if ($own === null) {
-                    respond_err('Scheda non trovata');
+                    respond_err(tr('err.workout_not_found'));
                 }
                 db_run("UPDATE workouts SET name = ? WHERE id = ? AND user_id = ?",
                     [$name, $workout_id, $user_id]);
@@ -839,7 +839,7 @@ try {
             $own = db_one("SELECT id FROM workouts WHERE id = ? AND user_id = ?",
                 [$workout_id, $user_id]);
             if ($own === null) {
-                respond_err('Scheda non trovata');
+                respond_err(tr('err.workout_not_found'));
             }
 
             if ($restore) {
@@ -861,7 +861,7 @@ try {
             $name = trim((string) ($_POST['name'] ?? ''));
 
             if ($name === '') {
-                respond_err('Il nome non può essere vuoto');
+                respond_err(tr('err.name_empty'));
             }
 
             $sets = ($_POST['target_sets'] ?? '') === '' ? null : (int) $_POST['target_sets'];
@@ -874,7 +874,7 @@ try {
 
             $url = trim((string) ($_POST['url'] ?? ''));
             if ($url !== '' && !valid_url($url)) {
-                respond_err('URL non valido (usa http:// o https://)');
+                respond_err(tr('err.url_invalid'));
             }
             $url = $url === '' ? null : $url;
 
@@ -886,7 +886,7 @@ try {
                     [$exercise_id, $user_id]
                 );
                 if ($own === null) {
-                    respond_err('Esercizio non trovato');
+                    respond_err(tr('err.exercise_not_found'));
                 }
                 db_run(
                     "UPDATE exercises
@@ -902,7 +902,7 @@ try {
                     [$workout_id, $user_id]
                 );
                 if ($own === null) {
-                    respond_err('Scheda non trovata');
+                    respond_err(tr('err.workout_not_found'));
                 }
                 $pos = (int) db_value(
                     "SELECT COALESCE(MAX(position), 0) + 1 FROM exercises
@@ -935,7 +935,7 @@ try {
                 [$exercise_id, $user_id]
             );
             if ($own === null) {
-                respond_err('Esercizio non trovato');
+                respond_err(tr('err.exercise_not_found'));
             }
 
             if ($restore) {
@@ -953,14 +953,14 @@ try {
             $user_id = requireLogin();
             $type = (string) ($_POST['type'] ?? '');
             if ($type !== 'workout' && $type !== 'exercise') {
-                respond_err('Tipo non valido');
+                respond_err(tr('err.type_invalid'));
             }
 
             $ids = array_values(array_filter(
                 array_map('intval', explode(',', (string) ($_POST['ids'] ?? '')))
             ));
             if (!$ids) {
-                respond_err('Nessun elemento da ordinare');
+                respond_err(tr('err.nothing_to_reorder'));
             }
 
             db()->beginTransaction();
@@ -1003,7 +1003,7 @@ try {
                 [$workout_id, $user_id]
             );
             if ($own === null) {
-                respond_err('Scheda non trovata');
+                respond_err(tr('err.workout_not_found'));
             }
 
             if (!$enabled) {
@@ -1040,7 +1040,7 @@ try {
 
             $shared = shared_workout_by_code($raw);
             if ($shared === null) {
-                respond_err('Codice non valido o condivisione revocata');
+                respond_err(tr('err.share_code_invalid'));
             }
 
             $source_id = (int) $shared['workout']['id'];
@@ -1153,10 +1153,10 @@ try {
         }
 
         default:
-            respond_err('Azione sconosciuta');
+            respond_err(tr('err.unknown_action'));
     }
 } catch (Throwable $e) {
     // Nessun dettaglio verso il client (punto 5.9): logga e rispondi generico.
     error_log('api.php: ' . $e->getMessage());
-    respond_err('Errore interno');
+    respond_err(tr('err.internal'));
 }

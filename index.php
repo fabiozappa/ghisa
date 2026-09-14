@@ -64,6 +64,26 @@ if ($logged) {
 $v_css = @filemtime(__DIR__ . '/style.css') ?: time();
 $v_js  = @filemtime(__DIR__ . '/app.js') ?: time();
 
+// Frase di accettazione dei documenti, con i link dentro. Si escapa prima il
+// testo tradotto e poi si mettono i link al posto dei segnaposto: così
+// l'unico HTML che finisce nella pagina è quello scritto qui.
+$doc_link = function (string $url_key, string $label_key): string {
+    return '<a href="' . trh($url_key) . '" target="_blank" rel="noopener">'
+        . trh($label_key) . '</a>';
+};
+$accept_html = strtr(trh('reg.accept'), [
+    '{terms}'   => $doc_link('doc.terms_url', 'doc.terms'),
+    '{privacy}' => $doc_link('doc.privacy_url', 'doc.privacy'),
+]);
+
+// Selettore della lingua: i link passano da ?lang=, che salva il cookie.
+$lang_links = [];
+foreach (lang_names() as $code => $name) {
+    $current = ($code === lang_current()) ? ' aria-current="true"' : '';
+    $lang_links[] = '<a href="index.php?lang=' . urlencode($code) . '"' . $current . '>'
+        . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '</a>';
+}
+
 // Flag JSON-safe anche dentro <script> (niente breakout con </script>).
 $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
     | JSON_HEX_QUOT | JSON_HEX_AMP;
@@ -86,68 +106,60 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
         <h1 class="brand">Ghisa</h1>
         <form id="login-form" autocomplete="off">
             <label>
-                Nome utente
+                <?= trh('login.username') ?>
                 <input id="login-username" name="username" type="text"
                        inputmode="text" autocapitalize="none"
                        autocomplete="username" required>
             </label>
             <label>
-                Prima parola
+                <?= trh('common.first_word') ?>
                 <input id="login-word1" name="word1" type="text"
                        inputmode="text" autocapitalize="none"
                        autocomplete="off" required>
             </label>
             <label>
-                Seconda parola
+                <?= trh('common.second_word') ?>
                 <input id="login-word2" name="word2" type="text"
                        inputmode="text" autocapitalize="none"
                        autocomplete="off" required>
             </label>
-            <button type="submit" id="login-submit">Entra</button>
+            <button type="submit" id="login-submit"><?= trh('login.submit') ?></button>
             <p id="login-error" class="error" role="alert" hidden></p>
             <button type="button" id="show-register" class="link">
-                Non hai un account? Registrati
+                <?= trh('login.to_register') ?>
             </button>
         </form>
 
         <!-- Registrazione: stessa forma del login, con in piu' la creazione. -->
         <form id="register-form" autocomplete="off" hidden>
             <label>
-                Nome utente
+                <?= trh('login.username') ?>
                 <input id="reg-username" name="username" type="text"
                        inputmode="text" autocapitalize="none"
                        autocomplete="username" required>
             </label>
             <label>
-                Prima parola
+                <?= trh('common.first_word') ?>
                 <input id="reg-word1" name="word1" type="text"
                        inputmode="text" autocapitalize="none"
                        autocomplete="off" required>
             </label>
             <label>
-                Seconda parola
+                <?= trh('common.second_word') ?>
                 <input id="reg-word2" name="word2" type="text"
                        inputmode="text" autocapitalize="none"
                        autocomplete="off" required>
             </label>
-            <p class="reg-hint">
-                Due parole che ricordi facilmente, almeno 3 lettere ciascuna.
-                Serviranno per entrare, insieme al nome utente.
-            </p>
-            <p class="reg-hint">
-                Creando un account accetti i
-                <a href="terms-it.html" target="_blank" rel="noopener">Termini d'uso</a>
-                e la <a href="privacy-it.html" target="_blank" rel="noopener">Privacy</a>
-                (<a href="terms-en.html" target="_blank" rel="noopener">English</a>).
-                Il servizio è fornito così com'è: nessuna garanzia, nessun backup,
-                nessuna assistenza.
-            </p>
-            <button type="submit" id="reg-submit">Crea account</button>
+            <p class="reg-hint"><?= trh('reg.hint') ?></p>
+            <p class="reg-hint"><?= $accept_html ?></p>
+            <button type="submit" id="reg-submit"><?= trh('reg.submit') ?></button>
             <p id="reg-error" class="error" role="alert" hidden></p>
             <button type="button" id="show-login" class="link">
-                Hai gia' un account? Entra
+                <?= trh('reg.to_login') ?>
             </button>
         </form>
+
+        <p class="lang-switch"><?= implode(' · ', $lang_links) ?></p>
 
     </main>
 
@@ -157,7 +169,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             <span class="brand-small">Ghisa</span>
             <!-- Indicatore discreto dei set ancora in coda offline. -->
             <span id="queue-indicator" class="queue" hidden></span>
-            <button id="logout-btn" class="link" type="button">Esci</button>
+            <button id="logout-btn" class="link" type="button"><?= trh('app.logout') ?></button>
         </header>
 
         <!-- Selettore scheda / home. -->
@@ -180,6 +192,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             // Lingua e testi dell'interfaccia, già completi: dove manca una
             // traduzione c'è l'italiano. Li legge tr() in app.js.
             lang: <?= json_encode(lang_current(), $json_flags) ?>,
+            langs: <?= json_encode(lang_names(), $json_flags | JSON_FORCE_OBJECT) ?>,
             strings: <?= json_encode(lang_strings(), $json_flags | JSON_FORCE_OBJECT) ?>
         };
     </script>

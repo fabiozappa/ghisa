@@ -102,23 +102,29 @@ function fmtWeight(w) {
 
 // Etichetta "quanti giorni fa" dell'ultima sessione completata di una scheda.
 function daysAgoLabel(dt) {
-    if (!dt) return 'mai fatta';
+    if (!dt) return tr('home.never');
     const then = new Date(String(dt).replace(' ', 'T'));
     if (isNaN(then.getTime())) return '';
     const t0 = new Date(then.getFullYear(), then.getMonth(), then.getDate());
     const now = new Date();
     const n0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const days = Math.round((n0 - t0) / 86400000);
-    if (days <= 0) return 'oggi';
-    if (days === 1) return 'ieri';
-    return days + ' giorni fa';
+    if (days <= 0) return tr('home.today');
+    if (days === 1) return tr('home.yesterday');
+    return trn('home.days_ago', days);
 }
 
-// Data e ora leggibili all'italiana: 31/08/2026 18:42
+// Data e ora nel formato della lingua: 31/08/2026, 18:42 in italiano.
+// La variante regionale la dà il browser (en-GB mette il giorno prima del
+// mese, en-US dopo), ma solo se è della stessa lingua dell'interfaccia.
 function formatStamp(d) {
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} `
-        + `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const lang = (window.GHISA && window.GHISA.lang) || 'it';
+    const nav = navigator.language || '';
+    const locale = nav.toLowerCase().startsWith(lang) ? nav : lang;
+    return new Intl.DateTimeFormat(locale, {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    }).format(d);
 }
 
 // Riepilogo pronto da incollare altrove: la data/ora finisce in coda alla
@@ -177,6 +183,49 @@ function tr(key, params) {
             Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match);
     }
     return text;
+}
+
+// Come tr(), con singolare e plurale: legge "<chiave>.one" oppure
+// "<chiave>.other" e mette n nel segnaposto {n}. Stessa regola di trn() in
+// lang.php: "1 = singolare", giusta per italiano e inglese.
+function trn(key, n, params) {
+    const form = n === 1 ? 'one' : 'other';
+    return tr(key + '.' + form, Object.assign({ n }, params));
+}
+
+// Escape per i pochi punti in cui un testo tradotto finisce dentro innerHTML
+// (il markup del player). Altrove i testi vanno in textContent e non serve.
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+// Link a un documento legale nella lingua dell'interfaccia.
+function docLink(urlKey, labelKey) {
+    const a = document.createElement('a');
+    a.href = tr(urlKey);
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = tr(labelKey);
+    return a;
+}
+
+// Selettore della lingua: link a index.php?lang=, che salva il cookie e
+// ricarica. È lo stesso della schermata di accesso, scritto da index.php.
+function renderLangSwitch() {
+    const p = document.createElement('p');
+    p.className = 'lang-switch';
+    const langs = (window.GHISA && window.GHISA.langs) || {};
+    Object.keys(langs).forEach((code, i) => {
+        if (i > 0) p.append(' · ');
+        const a = document.createElement('a');
+        a.href = 'index.php?lang=' + encodeURIComponent(code);
+        a.textContent = langs[code];
+        if (code === window.GHISA.lang) a.setAttribute('aria-current', 'true');
+        p.appendChild(a);
+    });
+    return p;
 }
 
 // Avviso effimero in alto.
@@ -255,7 +304,7 @@ function queueRemove(clientUid) {
 function updateQueueIndicator() {
     const n = queueGetAll().length;
     if (n > 0) {
-        els.queueInd.textContent = n === 1 ? '1 set in coda' : n + ' set in coda';
+        els.queueInd.textContent = trn('queue.count', n);
         els.queueInd.hidden = false;
     } else {
         els.queueInd.hidden = true;
@@ -281,7 +330,7 @@ async function flushQueue() {
                 // Errore applicativo (es. dato non valido): non è recuperabile
                 // riprovando all'infinito. Lo tolgo e lo segnalo.
                 queueRemove(set.client_uid);
-                toast('Un set non è stato accettato dal server.');
+                toast(tr('queue.rejected'));
             }
         }
         await flushPendingDeletes();
@@ -342,10 +391,10 @@ async function maybeFinishPending() {
 
 async function undoLastSet() {
     if (!player || !player.history.length) {
-        toast('Nessuna serie da annullare.');
+        toast(tr('undo.none'));
         return;
     }
-    if (!confirm('Annullare l\'ultima serie registrata?')) return;
+    if (!confirm(tr('undo.confirm'))) return;
 
     const last = player.history.pop();
 
@@ -370,7 +419,7 @@ async function undoLastSet() {
     stopRest();
     stopWorkTimer();
     renderCurrentSet();
-    toast('Serie annullata');
+    toast(tr('undo.done'));
 }
 
 function getPendingDeletes() {
@@ -491,11 +540,11 @@ async function handleLogin(e) {
             showScreen('home');
             consumePendingImport();
         } else {
-            els.loginError.textContent = res.error || 'Accesso non riuscito';
+            els.loginError.textContent = res.error || tr('login.failed');
             els.loginError.hidden = false;
         }
     } catch (err) {
-        els.loginError.textContent = 'Errore di rete. Riprova.';
+        els.loginError.textContent = tr('common.network_error');
         els.loginError.hidden = false;
     } finally {
         els.loginSubmit.disabled = false;
@@ -525,11 +574,11 @@ async function handleRegister(e) {
             showScreen('home');
             consumePendingImport();
         } else {
-            els.regError.textContent = res.error || 'Registrazione non riuscita';
+            els.regError.textContent = res.error || tr('reg.failed');
             els.regError.hidden = false;
         }
     } catch (err) {
-        els.regError.textContent = 'Errore di rete. Riprova.';
+        els.regError.textContent = tr('common.network_error');
         els.regError.hidden = false;
     } finally {
         els.regSubmit.disabled = false;
@@ -554,14 +603,14 @@ function renderHome() {
     els.home.textContent = '';
 
     const h = document.createElement('h2');
-    h.textContent = homeEditMode ? 'Gestisci schede' : 'Le tue schede';
+    h.textContent = homeEditMode ? tr('common.manage_workouts') : tr('home.title');
     els.home.appendChild(h);
 
     if (workouts.length === 0) {
         const p = document.createElement('p');
         p.textContent = homeEditMode
-            ? 'Nessuna scheda. Creane una qui sotto.'
-            : 'Nessuna scheda. Vai su "Gestisci schede" per crearne una.';
+            ? tr('home.empty_edit')
+            : tr('home.empty');
         els.home.appendChild(p);
     }
 
@@ -591,13 +640,13 @@ function renderHome() {
     if (homeEditMode) {
         const add = document.createElement('button');
         add.className = 'big primary';
-        add.textContent = '+ Nuova scheda';
+        add.textContent = tr('home.new_workout');
         add.addEventListener('click', createWorkout);
         els.home.appendChild(add);
 
         const imp = document.createElement('button');
         imp.className = 'big';
-        imp.textContent = 'Importa da un link';
+        imp.textContent = tr('home.import');
         imp.addEventListener('click', () => importWorkout());
         els.home.appendChild(imp);
 
@@ -605,7 +654,7 @@ function renderHome() {
 
         const done = document.createElement('button');
         done.className = 'link';
-        done.textContent = 'Fine';
+        done.textContent = tr('home.done');
         done.addEventListener('click', () => {
             homeEditMode = false;
             homeShowDeleted = false;
@@ -615,19 +664,19 @@ function renderHome() {
     } else {
         const histBtn = document.createElement('button');
         histBtn.className = 'link';
-        histBtn.textContent = 'Storico allenamenti';
+        histBtn.textContent = tr('home.history');
         histBtn.addEventListener('click', openHistory);
         els.home.appendChild(histBtn);
 
         const acc = document.createElement('button');
         acc.className = 'link';
-        acc.textContent = 'Account';
+        acc.textContent = tr('common.account');
         acc.addEventListener('click', openAccount);
         els.home.appendChild(acc);
 
         const manage = document.createElement('button');
         manage.className = 'link';
-        manage.textContent = 'Gestisci schede';
+        manage.textContent = tr('common.manage_workouts');
         manage.addEventListener('click', () => {
             homeEditMode = true;
             renderHome();
@@ -664,8 +713,8 @@ function renderDeletedWorkouts() {
     const tog = document.createElement('button');
     tog.className = 'link';
     tog.textContent = homeShowDeleted
-        ? 'Nascondi eliminate'
-        : `Mostra eliminate (${del.length})`;
+        ? tr('home.hide_deleted')
+        : tr('home.show_deleted', { n: del.length });
     tog.addEventListener('click', () => {
         homeShowDeleted = !homeShowDeleted;
         renderHome();
@@ -688,15 +737,15 @@ function renderDeletedWorkouts() {
 
     const note = document.createElement('p');
     note.className = 'alt-for';
-    note.textContent = 'Le eliminate spariscono per sempre dopo 30 giorni.';
+    note.textContent = tr('home.trash_note');
     els.home.appendChild(note);
 }
 
 async function createWorkout() {
-    const name = prompt('Nome della nuova scheda:');
+    const name = prompt(tr('home.new_name_prompt'));
     if (name === null) return;
     if (!name.trim()) {
-        toast('Serve il nome.');
+        toast(tr('common.need_name'));
         return;
     }
     try {
@@ -704,12 +753,12 @@ async function createWorkout() {
         if (res.ok) {
             applyWorkoutsPayload(res.data);
             renderHome();
-            toast('Scheda creata');
+            toast(tr('home.created'));
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -728,28 +777,27 @@ async function moveWorkout(i, dir) {
             applyWorkoutsPayload(res.data);
             renderHome();
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
 async function trashWorkout(w) {
-    const ok = confirm(`Spostare «${w.name}» nel cestino?\n`
-        + 'Sparirà per sempre dopo 30 giorni. Lo storico resta comunque.');
+    const ok = confirm(tr('home.trash_confirm', { name: w.name }));
     if (!ok) return;
     try {
         const res = await api('delete_workout', { workout_id: w.id });
         if (res.ok) {
             applyWorkoutsPayload(res.data);
             renderHome();
-            toast('Spostata nel cestino');
+            toast(tr('home.trashed'));
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -759,12 +807,12 @@ async function restoreWorkout(w) {
         if (res.ok) {
             applyWorkoutsPayload(res.data);
             renderHome();
-            toast('Ripristinata');
+            toast(tr('home.restored'));
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -794,12 +842,12 @@ async function startWorkout(workoutId) {
         res = await api('get_workout', { workout_id: workoutId });
     } catch (e) {
         releaseWakeLock();
-        toast('Serve la rete per iniziare un allenamento.');
+        toast(tr('home.need_network_start'));
         return;
     }
     if (!res.ok) {
         releaseWakeLock();
-        toast(res.error || 'Impossibile aprire la scheda.');
+        toast(res.error || tr('home.open_failed'));
         return;
     }
 
@@ -829,17 +877,17 @@ function buildPlayerSkeleton() {
             <div class="p-progress" id="p-progress"></div>
             <h2 class="p-exercise" id="p-exercise"></h2>
             <div class="p-target" id="p-target"></div>
-            <a id="p-url" class="p-url" target="_blank" rel="noopener noreferrer" hidden>Vedi esercizio ↗</a>
+            <a id="p-url" class="p-url" target="_blank" rel="noopener noreferrer" hidden>${escapeHtml(tr('common.view_exercise'))}</a>
             <div class="p-set" id="p-set"></div>
             <div class="p-last" id="p-last" hidden></div>
 
             <label class="p-field">
-                Peso (kg)
+                ${escapeHtml(tr('player.weight'))}
                 <input id="p-weight" type="number" inputmode="decimal"
                        step="0.5" min="0">
             </label>
             <label class="p-field">
-                <span id="p-reps-label">Ripetizioni</span>
+                <span id="p-reps-label">${escapeHtml(tr('common.reps'))}</span>
                 <input id="p-reps" type="number" inputmode="numeric"
                        step="1" min="0">
             </label>
@@ -848,25 +896,25 @@ function buildPlayerSkeleton() {
 
             <div class="p-bar" id="p-bar" aria-hidden="true"></div>
 
-            <button id="p-next" class="big primary">Avanti</button>
+            <button id="p-next" class="big primary">${escapeHtml(tr('player.next'))}</button>
 
             <div class="p-extra">
-                <button id="p-add-set" class="link" type="button">+ Serie</button>
-                <button id="p-skip" class="link" type="button">Salta esercizio</button>
-                <button id="p-alt" class="link" type="button">Alternativa</button>
-                <button id="p-undo" class="link" type="button">↶ Annulla serie</button>
+                <button id="p-add-set" class="link" type="button">${escapeHtml(tr('player.add_set'))}</button>
+                <button id="p-skip" class="link" type="button">${escapeHtml(tr('player.skip'))}</button>
+                <button id="p-alt" class="link" type="button">${escapeHtml(tr('player.alternative'))}</button>
+                <button id="p-undo" class="link" type="button">${escapeHtml(tr('player.undo'))}</button>
             </div>
 
             <div id="p-rest" class="p-rest" hidden>
-                Recupero <span id="p-rest-count"></span>s
-                <button id="p-rest-skip" class="link">salta</button>
+                ${escapeHtml(tr('player.rest'))} <span id="p-rest-count"></span>s
+                <button id="p-rest-skip" class="link">${escapeHtml(tr('player.rest_skip'))}</button>
             </div>
 
-            <button id="p-finish" class="link">Termina allenamento</button>
-            <button id="p-cancel" class="link danger">Annulla allenamento</button>
+            <button id="p-finish" class="link">${escapeHtml(tr('player.finish'))}</button>
+            <button id="p-cancel" class="link danger">${escapeHtml(tr('player.cancel'))}</button>
 
             <div class="exlist-wrap">
-                <h3 class="exlist-title">Esercizi della scheda</h3>
+                <h3 class="exlist-title">${escapeHtml(tr('player.exlist_title'))}</h3>
                 <ol id="p-exlist" class="exlist"></ol>
             </div>
         </div>
@@ -893,10 +941,10 @@ function renderCurrentSet() {
     const total = setsPlanned(ex);
 
     $('#p-progress').textContent =
-        `Esercizio ${player.exIndex + 1} di ${player.exercises.length}`;
+        tr('player.progress', { n: player.exIndex + 1, total: player.exercises.length });
     $('#p-exercise').textContent = ex.name;
-    $('#p-target').textContent = ex.target ? 'Obiettivo ' + ex.target : '';
-    $('#p-set').textContent = `Serie ${player.setNumber} di ${total}`;
+    $('#p-target').textContent = ex.target ? tr('player.target', { target: ex.target }) : '';
+    $('#p-set').textContent = tr('player.set', { n: player.setNumber, total });
     renderSetBar(ex);
     renderLastSets(ex);
 
@@ -929,7 +977,7 @@ function renderCurrentSet() {
     // I secondi di tenuta finiscono in reps_completed, il recupero resta
     // rest_seconds come per gli altri esercizi.
     const isTime = ex.type === 'time';
-    $('#p-reps-label').textContent = isTime ? 'Secondi' : 'Ripetizioni';
+    $('#p-reps-label').textContent = isTime ? tr('player.seconds') : tr('common.reps');
     stopWorkTimer();
     $('#p-work').hidden = !isTime;
     if (isTime) renderWorkButton();
@@ -971,7 +1019,7 @@ function renderExerciseList() {
 function onNextSet() {
     ensureAudio();                 // sblocca l'audio col gesto dell'utente
     tapBuzz();
-    confirmTap($('#p-next'), '✓ Serie registrata');
+    confirmTap($('#p-next'), tr('player.set_logged'));
 
     const ex = currentExercise();
     const weightRaw = $('#p-weight').value.trim();
@@ -1081,13 +1129,13 @@ function addExtraSet() {
     const ex = currentExercise();
     ex._extra = (ex._extra || 0) + 1;
     renderCurrentSet();
-    toast('Serie aggiunta');
+    toast(tr('player.set_added'));
 }
 
 // "Salta esercizio": passa al prossimo senza registrare nulla per questo.
 function skipExercise() {
     tapBuzz();
-    confirmTap($('#p-skip'), '✓ Saltato');
+    confirmTap($('#p-skip'), tr('player.skipped'));
 
     player.exIndex += 1;
     player.setNumber = 1;
@@ -1118,7 +1166,7 @@ function renderLastSets(ex) {
             ? String(reps)
             : fmtWeight(s.weight_kg) + '×' + reps;
     });
-    box.textContent = 'Ultima volta: ' + parts.join(', ');
+    box.textContent = tr('player.last_time', { sets: parts.join(', ') });
     box.hidden = false;
 }
 
@@ -1162,7 +1210,7 @@ async function openAlternatives() {
     } catch (e) {
         renderAltView({
             primaryId, primaryName, alternatives: [],
-            error: 'Serve la rete per gestire le alternative.',
+            error: tr('alt.need_network'),
         });
     }
 }
@@ -1171,17 +1219,17 @@ function renderAltView(state) {
     altView.textContent = '';
 
     const h = document.createElement('h2');
-    h.textContent = 'Alternativa';
+    h.textContent = tr('player.alternative');
     altView.appendChild(h);
 
     const forLbl = document.createElement('p');
     forLbl.className = 'alt-for';
-    forLbl.textContent = 'Al posto di ' + state.primaryName;
+    forLbl.textContent = tr('alt.instead_of', { name: state.primaryName });
     altView.appendChild(forLbl);
 
     if (state.loading) {
         const l = document.createElement('p');
-        l.textContent = 'Carico…';
+        l.textContent = tr('common.loading');
         altView.appendChild(l);
         return;
     }
@@ -1198,7 +1246,7 @@ function renderAltView(state) {
     if (alts.length) {
         const t = document.createElement('h3');
         t.className = 'exlist-title';
-        t.textContent = 'Già usate';
+        t.textContent = tr('alt.used');
         altView.appendChild(t);
         alts.forEach((a) => {
             const btn = document.createElement('button');
@@ -1219,14 +1267,14 @@ function renderAltView(state) {
     // Form per una nuova alternativa (target precompilato dal corrente).
     const t2 = document.createElement('h3');
     t2.className = 'exlist-title';
-    t2.textContent = 'Nuova alternativa';
+    t2.textContent = tr('alt.new');
     altView.appendChild(t2);
 
     const curEx = currentExercise();
-    const name = altField('Nome', 'text');
-    const sets = altField('Serie', 'number');
-    const reps = altField('Ripetizioni', 'text');
-    const url = altField('Link (opzionale)', 'url');
+    const name = altField(tr('common.name'), 'text');
+    const sets = altField(tr('common.sets'), 'number');
+    const reps = altField(tr('common.reps'), 'text');
+    const url = altField(tr('common.link_optional'), 'url');
     sets.input.value = curEx.target_sets != null ? curEx.target_sets : '';
     reps.input.value = curEx.target_reps != null ? curEx.target_reps : '';
     altView.appendChild(name.label);
@@ -1236,10 +1284,10 @@ function renderAltView(state) {
 
     const add = document.createElement('button');
     add.className = 'big primary';
-    add.textContent = 'Usa questa alternativa';
+    add.textContent = tr('alt.use');
     add.addEventListener('click', async () => {
         const nm = name.input.value.trim();
-        if (!nm) { toast('Serve il nome.'); return; }
+        if (!nm) { toast(tr('common.need_name')); return; }
         add.disabled = true;
         try {
             const res = await api('add_alternative', {
@@ -1252,11 +1300,11 @@ function renderAltView(state) {
             if (res.ok) {
                 applyAlternative(res.data.exercise);
             } else {
-                toast(res.error || 'Errore.');
+                toast(res.error || tr('common.error'));
                 add.disabled = false;
             }
         } catch (e) {
-            toast('Serve la rete per aggiungere un\'alternativa.');
+            toast(tr('alt.need_network_add'));
             add.disabled = false;
         }
     });
@@ -1264,7 +1312,7 @@ function renderAltView(state) {
 
     const back = document.createElement('button');
     back.className = 'link';
-    back.textContent = 'Torna all\'allenamento';
+    back.textContent = tr('common.back_to_workout');
     back.addEventListener('click', () => showScreen('player'));
     altView.appendChild(back);
 }
@@ -1322,7 +1370,7 @@ function applyAlternative(alt) {
     stopRest();
     renderCurrentSet();
     showScreen('player');
-    toast('Sostituito con ' + alt.name);
+    toast(tr('alt.replaced_with', { name: alt.name }));
 }
 
 
@@ -1345,7 +1393,7 @@ function startRest(seconds) {
         if (remaining <= 0) {
             stopRest();
             restEndCue();
-            toast('Recupero finito');
+            toast(tr('player.rest_over'));
         } else {
             count.textContent = remaining;
         }
@@ -1363,14 +1411,14 @@ function toggleWorkTimer() {
         const done = workTimer.total - workTimer.remaining;
         stopWorkTimer();
         $('#p-reps').value = done > 0 ? done : '';
-        toast('Fermato a ' + done + 's');
+        toast(tr('player.stopped_at', { s: done }));
         return;
     }
 
     const ex = currentExercise();
     const total = parseInt(ex.target_reps, 10) || 0;
     if (total <= 0) {
-        toast('Imposta i secondi nella scheda.');
+        toast(tr('player.set_seconds'));
         return;
     }
 
@@ -1386,7 +1434,7 @@ function toggleWorkTimer() {
             stopWorkTimer();
             $('#p-reps').value = t;        // tenuta completa
             restEndCue();
-            toast('Tempo!');
+            toast(tr('player.time_up'));
         } else {
             renderWorkButton();
         }
@@ -1397,11 +1445,11 @@ function renderWorkButton() {
     const btn = $('#p-work');
     if (!btn || !player) return;
     if (workTimer) {
-        btn.textContent = '■ Ferma — ' + workTimer.remaining + 's';
+        btn.textContent = tr('player.work_stop', { s: workTimer.remaining });
         btn.classList.add('running');
     } else {
         const total = parseInt(currentExercise().target_reps, 10) || 0;
-        btn.textContent = total ? '▶ Avvia ' + total + 's' : '▶ Avvia';
+        btn.textContent = total ? tr('player.work_start_s', { s: total }) : tr('player.work_start');
         btn.classList.remove('running');
     }
 }
@@ -1485,7 +1533,7 @@ function openFinish(completed) {
     finishView.textContent = '';
 
     const h = document.createElement('h2');
-    h.textContent = 'Fine allenamento';
+    h.textContent = tr('finish.title');
     finishView.appendChild(h);
 
     // Sostituzioni fatte in questa sessione: scegli se renderle definitive.
@@ -1493,7 +1541,7 @@ function openFinish(completed) {
     if (subs.length) {
         const st = document.createElement('h3');
         st.className = 'exlist-title';
-        st.textContent = 'Sostituzioni';
+        st.textContent = tr('finish.substitutions');
         finishView.appendChild(st);
 
         subs.forEach((s) => {
@@ -1505,7 +1553,7 @@ function openFinish(completed) {
             cb.dataset.altId = s.id;
             row.appendChild(cb);
             const txt = document.createElement('span');
-            txt.textContent = `Rendi «${s.name}» definitivo al posto di «${s._primaryName}»`;
+            txt.textContent = tr('finish.make_permanent', { name: s.name, primary: s._primaryName });
             row.appendChild(txt);
             finishView.appendChild(row);
         });
@@ -1513,24 +1561,24 @@ function openFinish(completed) {
 
     const label = document.createElement('label');
     label.className = 'p-field';
-    label.textContent = 'Nota (opzionale)';
+    label.textContent = tr('finish.note');
     const ta = document.createElement('textarea');
     ta.id = 'finish-notes';
     ta.rows = 3;
-    ta.placeholder = 'Come è andata, dolori, energia…';
+    ta.placeholder = tr('finish.note_placeholder');
     label.appendChild(ta);
     finishView.appendChild(label);
 
     const save = document.createElement('button');
     save.className = 'big primary';
-    save.textContent = 'Salva e chiudi';
+    save.textContent = tr('finish.save');
     save.addEventListener('click', () => doFinish(ta.value.trim()));
     finishView.appendChild(save);
 
     if (!completed) {
         const back = document.createElement('button');
         back.className = 'link';
-        back.textContent = 'Torna all\'allenamento';
+        back.textContent = tr('common.back_to_workout');
         back.addEventListener('click', () => showScreen('player'));
         finishView.appendChild(back);
     }
@@ -1551,7 +1599,7 @@ async function doFinish(notes) {
             try {
                 await api('promote_alternative', { alternative_exercise_id: c.dataset.altId });
             } catch (e) {
-                toast('Sostituzione non salvata (offline).');
+                toast(tr('finish.sub_not_saved'));
             }
         }
     }
@@ -1584,7 +1632,7 @@ async function doFinish(notes) {
 
     // Chiusura differita.
     player = null;
-    toast('Sei offline: l\'allenamento verrà chiuso alla riconnessione.');
+    toast(tr('finish.offline'));
     renderHome();
     showScreen('home');
 }
@@ -1593,7 +1641,7 @@ async function doFinish(notes) {
 // cancella la sessione sul server (con retry se offline) e torna alla home.
 async function cancelSession() {
     if (!player) return;
-    if (!confirm('Annullare l\'allenamento? Non verrà salvato nulla.')) return;
+    if (!confirm(tr('finish.cancel_confirm'))) return;
 
     const workoutLogId = player.workoutLogId;
 
@@ -1612,7 +1660,7 @@ async function cancelSession() {
 
     renderHome();
     showScreen('home');
-    toast('Allenamento annullato.');
+    toast(tr('finish.cancelled'));
 }
 
 // Aggiorna in memoria la data "ultima completata" della scheda appena finita,
@@ -1637,7 +1685,7 @@ function showSummary(summary) {
     summaryView.textContent = '';
 
     const h = document.createElement('h2');
-    h.textContent = 'Allenamento salvato';
+    h.textContent = tr('finish.saved');
     summaryView.appendChild(h);
 
     const pre = document.createElement('pre');
@@ -1648,12 +1696,12 @@ function showSummary(summary) {
     // Copia il riepilogo (con data e ora) per incollarlo in un'altra app.
     const copy = document.createElement('button');
     copy.className = 'big primary';
-    copy.textContent = '📋 Copia riepilogo';
+    copy.textContent = tr('finish.copy');
     copy.addEventListener('click', async () => {
         const ok = await copyText(summaryWithStamp(summary));
         if (ok) {
             tapBuzz();
-            confirmTap(copy, '✓ Copiato');
+            confirmTap(copy, tr('common.copied'));
         } else {
             // Ripiego finale: seleziono il testo, così lo copi a mano.
             try {
@@ -1665,14 +1713,14 @@ function showSummary(summary) {
             } catch (e) {
                 // niente selezione: resta comunque il testo a schermo
             }
-            toast('Copia non riuscita: testo selezionato, copialo a mano.');
+            toast(tr('finish.copy_failed'));
         }
     });
     summaryView.appendChild(copy);
 
     const back = document.createElement('button');
     back.className = 'big';
-    back.textContent = 'Torna alla home';
+    back.textContent = tr('finish.home');
     back.addEventListener('click', () => {
         renderHome();
         showScreen('home');
@@ -1718,12 +1766,12 @@ async function openEditor(workoutId) {
                 showDeleted: false,
             };
         } else {
-            editState = { workoutId, error: res.error || 'Errore.', mode: 'list' };
+            editState = { workoutId, error: res.error || tr('common.error'), mode: 'list' };
         }
     } catch (e) {
         editState = {
             workoutId,
-            error: 'Serve la rete per modificare la scheda.',
+            error: tr('edit.need_network'),
             mode: 'list',
         };
     }
@@ -1739,7 +1787,7 @@ function renderEditor() {
 
     if (editState.loading) {
         const p = document.createElement('p');
-        p.textContent = 'Carico…';
+        p.textContent = tr('common.loading');
         editView.appendChild(p);
         return;
     }
@@ -1757,24 +1805,24 @@ function renderEditor() {
     }
 
     const h = document.createElement('h2');
-    h.textContent = 'Modifica scheda';
+    h.textContent = tr('edit.title');
     editView.appendChild(h);
 
     // Nome della scheda.
-    const nameField = altField('Nome della scheda', 'text');
+    const nameField = altField(tr('edit.name'), 'text');
     nameField.input.value = editState.workout.name;
     editView.appendChild(nameField.label);
 
     const saveName = document.createElement('button');
     saveName.className = 'link';
-    saveName.textContent = 'Salva nome';
+    saveName.textContent = tr('edit.save_name');
     saveName.addEventListener('click', () => renameWorkout(nameField.input.value));
     editView.appendChild(saveName);
 
     // Esercizi.
     const t = document.createElement('h3');
     t.className = 'exlist-title';
-    t.textContent = 'Esercizi';
+    t.textContent = tr('edit.exercises');
     editView.appendChild(t);
 
     editState.exercises.forEach((ex, i) => {
@@ -1785,7 +1833,7 @@ function renderEditor() {
 
     const add = document.createElement('button');
     add.className = 'big primary';
-    add.textContent = '+ Aggiungi esercizio';
+    add.textContent = tr('edit.add_exercise');
     add.addEventListener('click', () => {
         editState.mode = 'form';
         editState.editing = null;
@@ -1798,8 +1846,8 @@ function renderEditor() {
         const tog = document.createElement('button');
         tog.className = 'link';
         tog.textContent = editState.showDeleted
-            ? 'Nascondi eliminati'
-            : `Mostra eliminati (${editState.deleted.length})`;
+            ? tr('edit.hide_deleted')
+            : tr('edit.show_deleted', { n: editState.deleted.length });
         tog.addEventListener('click', () => {
             editState.showDeleted = !editState.showDeleted;
             renderEditor();
@@ -1819,7 +1867,7 @@ function renderEditor() {
             });
             const note = document.createElement('p');
             note.className = 'alt-for';
-            note.textContent = 'Gli eliminati spariscono per sempre dopo 30 giorni.';
+            note.textContent = tr('edit.trash_note');
             editView.appendChild(note);
         }
     }
@@ -1832,7 +1880,7 @@ function renderEditor() {
 function renderShareSection() {
     const h = document.createElement('h3');
     h.className = 'exlist-title';
-    h.textContent = 'Condivisione';
+    h.textContent = tr('share.title');
     editView.appendChild(h);
 
     const code = editState.workout.share_code;
@@ -1840,13 +1888,12 @@ function renderShareSection() {
     if (!code) {
         const note = document.createElement('p');
         note.className = 'alt-for';
-        note.textContent = 'Non condivisa. Attivandola ottieni un link da mandare '
-            + 'a chi vuoi: chi ce l\'ha vede la scheda e può importarla.';
+        note.textContent = tr('share.off_note');
         editView.appendChild(note);
 
         const on = document.createElement('button');
         on.className = 'big';
-        on.textContent = 'Attiva condivisione';
+        on.textContent = tr('share.enable');
         on.addEventListener('click', () => toggleShare(true));
         editView.appendChild(on);
         return;
@@ -1861,21 +1908,21 @@ function renderShareSection() {
 
     const copy = document.createElement('button');
     copy.className = 'big primary';
-    copy.textContent = '📋 Copia link';
+    copy.textContent = tr('share.copy_link');
     copy.addEventListener('click', async () => {
         const ok = await copyText(url);
         if (ok) {
             tapBuzz();
-            confirmTap(copy, '✓ Copiato');
+            confirmTap(copy, tr('common.copied'));
         } else {
-            toast('Copia non riuscita.');
+            toast(tr('share.copy_failed'));
         }
     });
     editView.appendChild(copy);
 
     const off = document.createElement('button');
     off.className = 'link danger';
-    off.textContent = 'Revoca condivisione';
+    off.textContent = tr('share.revoke');
     off.addEventListener('click', () => toggleShare(false));
     editView.appendChild(off);
 }
@@ -1888,8 +1935,7 @@ function shareUrl(code) {
 
 async function toggleShare(enabled) {
     if (!enabled) {
-        const ok = confirm('Revocare la condivisione?\n'
-            + 'Il link smetterà di funzionare. Chi l\'ha già importata tiene la sua copia.');
+        const ok = confirm(tr('share.revoke_confirm'));
         if (!ok) return;
     }
     try {
@@ -1900,21 +1946,21 @@ async function toggleShare(enabled) {
         if (res.ok) {
             editState.workout.share_code = res.data.share_code;
             renderEditor();
-            toast(enabled ? 'Condivisione attiva' : 'Condivisione revocata');
+            toast(enabled ? tr('share.enabled') : tr('share.revoked'));
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
 // Import: accetta il link intero o il solo codice, ci pensa il server.
 async function importWorkout(code) {
-    const value = code || prompt('Incolla il link o il codice della scheda condivisa:');
+    const value = code || prompt(tr('import.prompt'));
     if (value === null) return;
     if (!String(value).trim()) {
-        toast('Serve il codice.');
+        toast(tr('import.need_code'));
         return;
     }
     try {
@@ -1923,12 +1969,12 @@ async function importWorkout(code) {
             applyWorkoutsPayload(res.data);
             renderHome();
             showScreen('home');
-            toast('Scheda importata');
+            toast(tr('import.done'));
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -1952,7 +1998,7 @@ function consumePendingImport() {
         return;
     }
     if (!code) return;
-    if (confirm('Importare la scheda condivisa nel tuo account?')) {
+    if (confirm(tr('import.confirm'))) {
         importWorkout(code);
     }
 }
@@ -1960,7 +2006,7 @@ function consumePendingImport() {
 function editBackButton() {
     const back = document.createElement('button');
     back.className = 'link';
-    back.textContent = '← Home';
+    back.textContent = tr('common.home');
     back.addEventListener('click', () => {
         renderHome();
         showScreen('home');
@@ -1981,9 +2027,12 @@ function renderExerciseEditRow(ex, i, total) {
     const line2 = document.createElement('span');
     line2.className = 'wk-sub';
     const nAlt = (ex.alternatives || []).length;
-    line2.textContent = (ex.target || '—') + ' · rec ' + ex.rest_seconds + 's'
-        + (ex.url ? ' · link' : '')
-        + (nAlt ? ' · ' + nAlt + ' alt' : '');
+    line2.textContent = [
+        ex.target || '—',
+        tr('edit.meta_rest', { s: ex.rest_seconds }),
+        ex.url ? tr('edit.meta_link') : '',
+        nAlt ? tr('edit.meta_alt', { n: nAlt }) : '',
+    ].filter((part) => part !== '').join(' · ');
     name.appendChild(line2);
     name.addEventListener('click', () => {
         editState.mode = 'form';
@@ -2006,23 +2055,23 @@ function renderExerciseForm() {
     const ex = editState.editing;
 
     const h = document.createElement('h2');
-    h.textContent = ex ? 'Modifica esercizio' : 'Nuovo esercizio';
+    h.textContent = ex ? tr('ex.edit_title') : tr('ex.new_title');
     editView.appendChild(h);
 
-    const name = altField('Nome', 'text');
-    const type = altSelect('Tipo', [
-        ['reps', 'A ripetizioni'],
-        ['time', 'A tempo (secondi)'],
+    const name = altField(tr('common.name'), 'text');
+    const type = altSelect(tr('ex.type'), [
+        ['reps', tr('ex.type_reps')],
+        ['time', tr('ex.type_time')],
     ], ex && ex.type === 'time' ? 'time' : 'reps');
-    const sets = altField('Serie', 'number');
-    const reps = altField('Ripetizioni', 'text');
-    const rest = altField('Recupero (secondi)', 'number');
-    const url = altField('Link (opzionale)', 'url');
+    const sets = altField(tr('common.sets'), 'number');
+    const reps = altField(tr('common.reps'), 'text');
+    const rest = altField(tr('ex.rest'), 'number');
+    const url = altField(tr('common.link_optional'), 'url');
 
     // Per gli esercizi a tempo il campo non sono ripetizioni ma secondi.
     const syncRepsCaption = () => {
         reps.caption.textContent = type.input.value === 'time'
-            ? 'Secondi di tenuta' : 'Ripetizioni';
+            ? tr('ex.hold_seconds') : tr('common.reps');
     };
     type.input.addEventListener('change', syncRepsCaption);
     syncRepsCaption();
@@ -2041,10 +2090,10 @@ function renderExerciseForm() {
 
     const save = document.createElement('button');
     save.className = 'big primary';
-    save.textContent = 'Salva';
+    save.textContent = tr('common.save');
     save.addEventListener('click', async () => {
         if (!name.input.value.trim()) {
-            toast('Serve il nome.');
+            toast(tr('common.need_name'));
             return;
         }
         save.disabled = true;
@@ -2066,14 +2115,14 @@ function renderExerciseForm() {
         try {
             const res = await api('save_exercise', params);
             if (res.ok) {
-                toast('Salvato');
+                toast(tr('ex.saved'));
                 await reloadEditor();
             } else {
-                toast(res.error || 'Errore.');
+                toast(res.error || tr('common.error'));
                 save.disabled = false;
             }
         } catch (e) {
-            toast('Serve la rete.');
+            toast(tr('common.need_network'));
             save.disabled = false;
         }
     });
@@ -2084,7 +2133,7 @@ function renderExerciseForm() {
     if (ex && ex.alternatives && ex.alternatives.length) {
         const at = document.createElement('h3');
         at.className = 'exlist-title';
-        at.textContent = 'Alternative di questo esercizio';
+        at.textContent = tr('ex.alternatives_title');
         editView.appendChild(at);
 
         ex.alternatives.forEach((a) => {
@@ -2107,14 +2156,13 @@ function renderExerciseForm() {
 
         const note = document.createElement('p');
         note.className = 'alt-for';
-        note.textContent = 'Sono le sostituzioni già usate al posto di questo '
-            + 'esercizio. Toglierne una la fa sparire dalle proposte.';
+        note.textContent = tr('ex.alternatives_note');
         editView.appendChild(note);
     }
 
     const cancel = document.createElement('button');
     cancel.className = 'link';
-    cancel.textContent = 'Annulla';
+    cancel.textContent = tr('common.cancel');
     cancel.addEventListener('click', () => {
         editState.mode = 'list';
         editState.editing = null;
@@ -2126,7 +2174,7 @@ function renderExerciseForm() {
 async function renameWorkout(newName) {
     const name = (newName || '').trim();
     if (!name) {
-        toast('Il nome non può essere vuoto.');
+        toast(tr('ex.name_empty'));
         return;
     }
     try {
@@ -2137,12 +2185,12 @@ async function renameWorkout(newName) {
         if (res.ok) {
             applyWorkoutsPayload(res.data);
             editState.workout.name = name;
-            toast('Nome aggiornato');
+            toast(tr('ex.name_updated'));
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -2161,42 +2209,41 @@ async function moveExercise(i, dir) {
             editState.exercises = list;
             renderEditor();
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
 async function trashExercise(ex) {
-    const ok = confirm(`Eliminare «${ex.name}»?\n`
-        + 'Resta nel cestino 30 giorni. Lo storico non viene toccato.');
+    const ok = confirm(tr('ex.trash_confirm', { name: ex.name }));
     if (!ok) return;
     try {
         const res = await api('delete_exercise', { exercise_id: ex.id });
         if (res.ok) {
-            toast('Spostato nel cestino');
+            toast(tr('ex.trashed'));
             await reloadEditor();
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
 async function trashAlternative(a) {
-    if (!confirm(`Togliere «${a.name}» dalle alternative?`)) return;
+    if (!confirm(tr('ex.alt_remove_confirm', { name: a.name }))) return;
     try {
         const res = await api('delete_exercise', { exercise_id: a.id });
         if (res.ok) {
-            toast('Alternativa rimossa');
+            toast(tr('ex.alt_removed'));
             await reloadEditor();
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -2204,13 +2251,13 @@ async function restoreExercise(id) {
     try {
         const res = await api('delete_exercise', { exercise_id: id, restore: '1' });
         if (res.ok) {
-            toast('Ripristinato');
+            toast(tr('ex.restored'));
             await reloadEditor();
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -2229,30 +2276,31 @@ function openAccount() {
     accountView.textContent = '';
 
     const h = document.createElement('h2');
-    h.textContent = 'Account';
+    h.textContent = tr('common.account');
     accountView.appendChild(h);
 
+    // Il nome va in grassetto dentro una frase tradotta: si spezza il testo
+    // sul segnaposto {name} invece di comporre HTML.
     const who = document.createElement('p');
-    who.textContent = 'Sei entrato come ';
+    const [whoBefore, whoAfter = ''] = tr('account.signed_in_as').split('{name}');
     const strong = document.createElement('strong');
     strong.textContent = window.GHISA.username || '—';
-    who.appendChild(strong);
+    who.append(whoBefore, strong, whoAfter);
     accountView.appendChild(who);
 
     // Senza email non esiste un "password dimenticata": va detto qui, dove
     // l'utente può ancora leggere il proprio nome utente.
     const warn = document.createElement('p');
     warn.className = 'alt-for';
-    warn.textContent = 'Non chiediamo email né altri dati personali. Per questo le '
-        + 'credenziali NON sono recuperabili: se dimentichi il nome utente o le due '
-        + 'parole, l\'account e i suoi dati non sono più raggiungibili da nessuno. '
-        + 'Annotale in un posto sicuro.';
+    warn.textContent = tr('account.warning');
     accountView.appendChild(warn);
 
     const docs = document.createElement('p');
-    docs.innerHTML = '<a href="terms-it.html" target="_blank" rel="noopener">Termini d\'uso</a>'
-        + ' · <a href="privacy-it.html" target="_blank" rel="noopener">Privacy</a>';
+    docs.append(docLink('doc.terms_url', 'doc.terms'), ' · ',
+        docLink('doc.privacy_url', 'doc.privacy'));
     accountView.appendChild(docs);
+
+    accountView.appendChild(renderLangSwitch());
 
     // --- Zona pericolosa ---
     const dz = document.createElement('div');
@@ -2260,23 +2308,21 @@ function openAccount() {
 
     const dh = document.createElement('h3');
     dh.className = 'exlist-title';
-    dh.textContent = 'Elimina account';
+    dh.textContent = tr('account.delete_title');
     dz.appendChild(dh);
 
     const dp = document.createElement('p');
-    dp.textContent = 'Cancella definitivamente l\'account e tutto ciò che contiene: '
-        + 'schede, esercizi e storico degli allenamenti. Non è recuperabile. '
-        + 'Le schede che altri hanno importato restano loro.';
+    dp.textContent = tr('account.delete_text');
     dz.appendChild(dp);
 
-    const w1 = altField('Prima parola', 'text');
-    const w2 = altField('Seconda parola', 'text');
+    const w1 = altField(tr('common.first_word'), 'text');
+    const w2 = altField(tr('common.second_word'), 'text');
     dz.appendChild(w1.label);
     dz.appendChild(w2.label);
 
     const del = document.createElement('button');
     del.className = 'big danger-btn';
-    del.textContent = 'Elimina definitivamente';
+    del.textContent = tr('account.delete_button');
     del.addEventListener('click', () => deleteAccount(w1.input.value, w2.input.value));
     dz.appendChild(del);
 
@@ -2284,7 +2330,7 @@ function openAccount() {
 
     const back = document.createElement('button');
     back.className = 'link';
-    back.textContent = '← Home';
+    back.textContent = tr('common.home');
     back.addEventListener('click', () => {
         renderHome();
         showScreen('home');
@@ -2296,12 +2342,10 @@ function openAccount() {
 
 async function deleteAccount(word1, word2) {
     if (!word1.trim() || !word2.trim()) {
-        toast('Inserisci le due parole per confermare.');
+        toast(tr('account.need_words'));
         return;
     }
-    const ok = confirm('Eliminare definitivamente l\'account?\n\n'
-        + 'Spariscono schede, esercizi e tutto lo storico. '
-        + 'Non si può annullare e non si può recuperare.');
+    const ok = confirm(tr('account.delete_confirm'));
     if (!ok) return;
 
     try {
@@ -2311,10 +2355,10 @@ async function deleteAccount(word1, word2) {
             localStorage.clear();
             location.href = 'index.php';
         } else {
-            toast(res.error || 'Errore.');
+            toast(res.error || tr('common.error'));
         }
     } catch (e) {
-        toast('Serve la rete.');
+        toast(tr('common.need_network'));
     }
 }
 
@@ -2326,12 +2370,12 @@ async function deleteAccount(word1, word2) {
 async function openHistory() {
     els.history.textContent = '';
     const h = document.createElement('h2');
-    h.textContent = 'Storico';
+    h.textContent = tr('history.title');
     els.history.appendChild(h);
 
     const back = document.createElement('button');
     back.className = 'link';
-    back.textContent = '← Home';
+    back.textContent = tr('common.home');
     back.addEventListener('click', () => showScreen('home'));
     els.history.appendChild(back);
 
@@ -2342,19 +2386,19 @@ async function openHistory() {
         res = await api('get_history', { limit: 30, offset: 0 });
     } catch (e) {
         const p = document.createElement('p');
-        p.textContent = 'Serve la rete per vedere lo storico.';
+        p.textContent = tr('history.need_network');
         els.history.appendChild(p);
         return;
     }
     if (!res.ok) {
-        toast(res.error || 'Errore nel caricare lo storico.');
+        toast(res.error || tr('history.load_failed'));
         return;
     }
 
     const sessions = res.data.sessions || [];
     if (sessions.length === 0) {
         const p = document.createElement('p');
-        p.textContent = 'Ancora nessun allenamento registrato.';
+        p.textContent = tr('history.empty');
         els.history.appendChild(p);
         return;
     }
@@ -2369,7 +2413,7 @@ function renderSession(s) {
     const head = document.createElement('div');
     head.className = 'session-head';
     const day = (s.started_at || '').slice(0, 10);
-    head.textContent = `${s.workout_name || 'Scheda'} — ${day}`;
+    head.textContent = `${s.workout_name || tr('common.workout')} — ${day}`;
     card.appendChild(head);
 
     (s.sets || []).forEach((set) => {

@@ -26,6 +26,8 @@ Filosofia KISS: nessuna email, nessun tracciamento, nessuna dipendenza esterna.
   importare la scheda nel proprio account.
 - **PWA installabile**, con schermo sempre acceso durante l'allenamento.
 - **Multi-utente** con registrazione libera.
+- **Italiano e inglese.** La lingua si prende dal browser e si cambia dalla schermata di
+  accesso o da Account.
 
 ---
 
@@ -193,6 +195,10 @@ momento della scrittura, e le chiavi esterne verso schede ed esercizi sono in
 
 **Il cestino.** Schede ed esercizi cancellati restano recuperabili 30 giorni, poi
 spariscono davvero. La pulizia è pigra, all'accesso: niente cron.
+
+**Le lingue.** Tutti i testi stanno in `lang-it.php` e `lang-en.php`, e l'italiano fa da
+riserva per le chiavi mancanti. La scelta manuale resta in un cookie. Per aggiungere una
+lingua basta un nuovo file e il suo codice in `lang.php`: i dettagli sono in `CLAUDE.md`.
 
 ---
 

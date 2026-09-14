@@ -73,6 +73,16 @@ body[data-logged-in="0"] #login-view { display: flex; }
 #login-form,
 #register-form { display: flex; flex-direction: column; gap: 16px; }
 
+/* Selettore della lingua (accesso e Account). Sono link di solo testo, ma
+   l'area di tocco resta quella minima di 48px. */
+.lang-switch { margin-top: 24px; text-align: center; color: var(--muted); }
+.lang-switch a {
+    display: inline-block;
+    min-height: var(--tap);
+    padding: 12px 8px;
+}
+.lang-switch a[aria-current] { color: var(--muted); text-decoration: none; }
+
 /* --- Campi ---------------------------------------------------------------- */
 label {
     display: flex;

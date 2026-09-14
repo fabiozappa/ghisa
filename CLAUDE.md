@@ -325,29 +325,52 @@ front controller e non si può includere. Duplicazione voluta, non svista.
 
 ### Lingue
 
-Italiano e inglese. ⚠️ **Migrazione in corso**: i testi si spostano dal codice ai file
-lingua un passo alla volta. Finché non è finita, convivono testi tradotti e testi ancora
-scritti nel codice.
+Italiano e inglese. **Tutti i testi dell'interfaccia stanno nei file lingua**: nel codice
+non si scrivono frasi, si scrive `tr('chiave')`. Anche un testo nuovo va aggiunto in
+entrambi i file.
 
 - Un file per lingua, `lang-<codice>.php`, che ritorna un array `chiave => testo`.
   **L'italiano è la lingua di riserva**: ogni chiave deve esistere lì. Nelle altre lingue
   una chiave mancante compare in italiano, mai come buco vuoto.
 - La lingua la decide `lang_current()`: cookie `GHISALANG` → `Accept-Language` → italiano.
   La scelta manuale è `index.php?lang=en`, gestita come il logout: salva il cookie e
-  torna all'URL pulito, conservando gli altri parametri (`?import=`).
-- `index.php` inietta il dizionario **già completo** in `window.GHISA.strings`: nessuna
-  richiesta in più, e il service worker non c'entra.
-- In PHP e in JS la funzione si chiama **`tr()`, non `t()`**: in `app.js` `t` è già una
-  variabile locale in più punti e lì nasconderebbe la funzione.
+  torna all'URL pulito, conservando gli altri parametri (`?import=`). Il selettore sta
+  nella schermata di accesso e in Account, **non nel player**: cambiare lingua ricarica la
+  pagina, e a metà allenamento si perderebbe il punto.
+- `index.php` inietta il dizionario **già completo** in `window.GHISA.strings`, e i nomi
+  delle lingue in `GHISA.langs`: nessuna richiesta in più, e il service worker non c'entra.
+- Le funzioni, uguali in PHP e in JS:
+  - `tr(chiave, params)`: il testo con i segnaposto sostituiti. **Non fa escape.**
+  - `trn(chiave, n, params)`: plurali, legge `chiave.one` / `chiave.other`. Regola
+    "1 = singolare", giusta per italiano e inglese; una lingua con più forme plurali va
+    gestita in entrambe le `trn()`.
+  - solo PHP, `trh()`: `tr()` già escapato per l'HTML.
+  - solo JS, `escapeHtml()`: per l'unico punto in cui un testo tradotto finisce in
+    `innerHTML`, il markup del player. Altrove i testi vanno in `textContent`.
+- Si chiamano **`tr()`, non `t()`**: in `app.js` `t` è già una variabile locale in più
+  punti e lì nasconderebbe la funzione.
 - **Mai comporre frasi concatenando pezzi tradotti.** Segnaposto `{n}`, `{name}` dentro il
-  testo: l'ordine delle parole cambia tra le lingue.
-- `tr()` **non fa escape**: in HTML il risultato passa comunque da `htmlspecialchars`, in JS
-  finisce in `textContent`.
+  testo: l'ordine delle parole cambia tra le lingue. Se dentro la frase serve HTML (un
+  link, un grassetto) si **escapa prima il testo e poi si sostituisce il segnaposto** con
+  l'HTML scritto nel codice: vedi i link ai documenti in `index.php`.
+- Anche gli errori di `api.php` sono tradotti: **il client non confronta mai il testo di un
+  errore**, lo mostra e basta. Se un giorno servisse distinguere un errore, va aggiunto un
+  codice nella risposta, non letto il messaggio.
+- Il riepilogo copiabile esce nella lingua di chi chiude l'allenamento ("Nota:"), con la
+  data formattata da `Intl.DateTimeFormat`.
 - Il cookie `GHISALANG` è `SameSite=Lax`, non Strict: chi apre un link condiviso arriva da
   un altro sito, e con Strict il cookie non partirebbe. Contiene solo il codice lingua ed
   è **dichiarato nella privacy**.
 - Non si traducono i dati dell'utente: nomi di schede ed esercizi, e il target dei log
   (`3x10`, `3x45s`), che è già neutro.
+- `manifest.json` è statico e resta in italiano: il suo unico testo è nome e descrizione,
+  e generarlo da PHP solo per quello non vale la complicazione.
+
+**Aggiungere una lingua**: il codice in `LANGS` (`lang.php`), una copia tradotta di
+`lang-it.php` salvata come `lang-<codice>.php`, e i documenti legali
+`terms-<codice>.html` / `privacy-<codice>.html` (oppure le chiavi `doc.*_url` puntate a
+quelli inglesi). In inglese: scheda = *workout*, allenamento = *session*, cestino = *bin*,
+come nei documenti.
 
 ### Interfaccia
 

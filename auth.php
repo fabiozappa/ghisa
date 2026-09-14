@@ -3,6 +3,7 @@
 // Raccolta di funzioni, niente OOP.
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/lang.php';   // messaggi d'errore tradotti
 
 // Configura i cookie di sessione e avvia la sessione. Idempotente: se la
 // sessione è già attiva non fa nulla, così può essere chiamata liberamente.
@@ -68,13 +69,13 @@ function credentials_error(string $username, string $word1, string $word2): ?str
 {
     $u = normalize_username($username);
     if (strlen($u) < 3 || strlen($u) > 50) {
-        return 'Il nome utente deve avere fra 3 e 50 caratteri';
+        return tr('err.username_length');
     }
     if (!preg_match('/^[a-z0-9._-]+$/', $u)) {
-        return 'Il nome utente può contenere solo lettere, numeri, punto, trattino e underscore';
+        return tr('err.username_chars');
     }
     if (strlen(trim($word1)) < 3 || strlen(trim($word2)) < 3) {
-        return 'Ognuna delle due parole deve avere almeno 3 caratteri';
+        return tr('err.words_length');
     }
     return null;
 }
@@ -193,7 +194,7 @@ function register_user(string $username, string $word1, string $word2)
 
     $u = normalize_username($username);
     if (db_one("SELECT id FROM users WHERE username = ?", [$u]) !== null) {
-        return 'Nome utente già in uso';
+        return tr('err.username_taken');
     }
 
     $hash = password_hash(normalize_passphrase($word1, $word2), PASSWORD_DEFAULT);
@@ -206,7 +207,7 @@ function register_user(string $username, string $word1, string $word2)
     } catch (PDOException $e) {
         // Due registrazioni simultanee sullo stesso nome: decide il vincolo UNIQUE.
         if ($e->getCode() === '23000') {
-            return 'Nome utente già in uso';
+            return tr('err.username_taken');
         }
         throw $e;
     }
@@ -248,7 +249,7 @@ function requireLogin(): int
     if (empty($_SESSION['user_id'])) {
         http_response_code(401);
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['ok' => false, 'error' => 'Sessione scaduta']);
+        echo json_encode(['ok' => false, 'error' => tr('err.session_expired')]);
         exit;
     }
 

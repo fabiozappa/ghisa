@@ -11,6 +11,11 @@
 // È una duplicazione voluta e segnalata, non una svista.
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/lang.php';
+
+// La pagina cambia con la lingua di chi la apre (cookie o browser): chi la
+// mette in cache deve tenerne conto.
+header('Vary: Accept-Language, Cookie');
 
 $code = trim((string) ($_GET['s'] ?? ''));
 
@@ -64,19 +69,19 @@ $site_url = $scheme . '://' . $host;
 
 if ($workout === null) {
     http_response_code(404);
-    $title = 'Scheda non disponibile — Ghisa';
-    $description = 'Questa scheda di allenamento non esiste o la condivisione è stata revocata.';
+    $title = tr('public.not_found_title');
+    $description = tr('public.not_found_desc');
 } else {
     $names = array_slice(array_column($exercises, 'name'), 0, 5);
-    $title = $workout['name'] . ' — scheda di allenamento | Ghisa';
-    $description = count($exercises) . ' esercizi: ' . implode(', ', $names)
-        . (count($exercises) > 5 ? '…' : '.');
+    $title = tr('public.title', ['name' => $workout['name']]);
+    $list = implode(', ', $names) . (count($exercises) > 5 ? '…' : '.');
+    $description = trn('public.desc', count($exercises), ['list' => $list]);
 }
 
 $v_css = @filemtime(__DIR__ . '/style.css') ?: time();
 ?>
 <!doctype html>
-<html lang="it">
+<html lang="<?= h(lang_current()) ?>">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -94,6 +99,7 @@ $v_css = @filemtime(__DIR__ . '/style.css') ?: time();
     <!-- Anteprima quando il link viene incollato in chat o sui social. -->
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Ghisa">
+    <meta property="og:locale" content="<?= h(tr('lang.locale')) ?>">
     <meta property="og:title" content="<?= h($title) ?>">
     <meta property="og:description" content="<?= h($description) ?>">
     <meta property="og:url" content="<?= h($page_url) ?>">
@@ -111,17 +117,16 @@ $v_css = @filemtime(__DIR__ . '/style.css') ?: time();
 <?php if ($workout === null): ?>
 
     <h1 class="brand">Ghisa</h1>
-    <p>Questa scheda non esiste, oppure la condivisione è stata revocata da chi
-       l'aveva pubblicata.</p>
-    <a class="big" href="index.php">Vai a Ghisa</a>
+    <p><?= h(tr('public.not_found_text')) ?></p>
+    <a class="big" href="index.php"><?= h(tr('public.go')) ?></a>
 
 <?php else: ?>
 
-    <p class="public-kicker">Scheda di allenamento condivisa</p>
+    <p class="public-kicker"><?= h(tr('public.kicker')) ?></p>
     <h1 class="public-title"><?= h($workout['name']) ?></h1>
 
     <?php if (!$exercises): ?>
-        <p>Questa scheda non ha ancora esercizi.</p>
+        <p><?= h(tr('public.empty')) ?></p>
     <?php else: ?>
         <ol class="public-list">
         <?php foreach ($exercises as $e): ?>
@@ -130,12 +135,12 @@ $v_css = @filemtime(__DIR__ . '/style.css') ?: time();
                 <span class="public-ex-meta">
                     <?php $t = public_target($e); ?>
                     <?= $t !== '' ? h($t) : '—' ?>
-                    · recupero <?= (int) $e['rest_seconds'] ?>s
+                    · <?= h(tr('public.rest', ['s' => (int) $e['rest_seconds']])) ?>
                 </span>
                 <?php if ($e['url'] && preg_match('#^https?://#i', $e['url'])): ?>
                     <a class="public-ex-link" href="<?= h($e['url']) ?>"
                        target="_blank" rel="noopener noreferrer nofollow">
-                        Vedi esercizio ↗
+                        <?= h(tr('common.view_exercise')) ?>
                     </a>
                 <?php endif; ?>
             </li>
@@ -144,11 +149,10 @@ $v_css = @filemtime(__DIR__ . '/style.css') ?: time();
     <?php endif; ?>
 
     <a class="big primary" href="index.php?import=<?= h(strtolower($code)) ?>">
-        Importa questa scheda in Ghisa
+        <?= h(tr('public.import')) ?>
     </a>
     <p class="public-foot">
-        <strong>Ghisa</strong> è un'app per seguire le proprie schede di
-        allenamento dal telefono, e tenere lo storico dei carichi.
+        <?= strtr(h(tr('public.foot')), ['{brand}' => '<strong>Ghisa</strong>']) ?>
     </p>
 
 <?php endif; ?>

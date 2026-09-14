@@ -125,15 +125,48 @@ function lang_strings(): array
 
 // Traduce una chiave. I segnaposto {nome} vengono sostituiti con $params.
 // Una chiave inesistente torna com'è: si vede subito, invece di un buco vuoto.
-// Il testo NON è escapato: in HTML va comunque passato da htmlspecialchars.
+// Il testo NON è escapato: in HTML si usa trh().
+//
+// strtr e non str_replace in ciclo: sostituisce in un passaggio solo, quindi
+// un valore che contiene a sua volta "{qualcosa}" (es. una nota scritta
+// dall'utente) non viene rielaborato.
 function tr(string $key, array $params = []): string
 {
     $strings = lang_strings();
     $text = $strings[$key] ?? $key;
 
+    $pairs = [];
     foreach ($params as $name => $value) {
-        $text = str_replace('{' . $name . '}', (string) $value, $text);
+        $pairs['{' . $name . '}'] = (string) $value;
     }
 
-    return $text;
+    return strtr($text, $pairs);
+}
+
+// Come tr(), ma pronto per l'HTML: escapa il risultato, valori compresi.
+function trh(string $key, array $params = []): string
+{
+    return htmlspecialchars(tr($key, $params), ENT_QUOTES, 'UTF-8');
+}
+
+// Come tr(), con singolare e plurale: legge "<chiave>.one" oppure
+// "<chiave>.other" e mette $n nel segnaposto {n}.
+// La regola "1 = singolare" vale per italiano e inglese. Una lingua con più
+// forme plurali andrebbe gestita qui, e uguale in trn() di app.js.
+function trn(string $key, int $n, array $params = []): string
+{
+    $form = ($n === 1) ? 'one' : 'other';
+    return tr($key . '.' . $form, ['n' => $n] + $params);
+}
+
+// Nome di ogni lingua disponibile, scritto nella lingua stessa (chiave
+// 'lang.name' del suo file). Serve ai selettori: ['it' => 'Italiano', ...].
+function lang_names(): array
+{
+    $names = [];
+    foreach (LANGS as $code) {
+        $strings = require __DIR__ . '/lang-' . $code . '.php';
+        $names[$code] = $strings['lang.name'] ?? $code;
+    }
+    return $names;
 }
