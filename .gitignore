@@ -1,0 +1,5 @@
+/.nova/
+/_test/
+/.DS_Store
+/config.php
+/TODO.md
