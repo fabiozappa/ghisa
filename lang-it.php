@@ -107,6 +107,7 @@ return [
     "player.finish"       => "Termina allenamento",
     "player.cancel"       => "Annulla allenamento",
     "player.exlist_title" => "Esercizi della scheda",
+    "player.exlist_hint"  => "Tocca un esercizio per farlo adesso.",
     "player.set_logged"   => "✓ Serie registrata",
     "player.set_added"    => "Serie aggiunta",
     "player.skipped"      => "✓ Saltato",

@@ -412,9 +412,15 @@ async function undoLastSet() {
         }
     }
 
-    // Riporta il player alla serie annullata.
+    // Riporta il player alla serie annullata, anche se nel frattempo si era
+    // passati a un altro esercizio. La serie da rifare si ricava dallo storico,
+    // e un esercizio saltato dopo quella serie torna da fare.
+    if (last.exIndex !== player.exIndex) {
+        currentExercise()._lastWeight = player.lastWeight;
+    }
     player.exIndex = last.exIndex;
-    player.setNumber = last.setNumber;
+    player.exercises[last.exIndex]._skipped = false;
+    player.setNumber = setsDoneAt(last.exIndex) + 1;
     player.lastWeight = last.weight;
     stopRest();
     stopWorkTimer();
@@ -915,6 +921,7 @@ function buildPlayerSkeleton() {
 
             <div class="exlist-wrap">
                 <h3 class="exlist-title">${escapeHtml(tr('player.exlist_title'))}</h3>
+                <p class="exlist-hint">${escapeHtml(tr('player.exlist_hint'))}</p>
                 <ol id="p-exlist" class="exlist"></ol>
             </div>
         </div>
@@ -986,33 +993,115 @@ function renderCurrentSet() {
     stopRest();
 }
 
-// Lista completa degli esercizi della scheda, con evidenziato quello in corso
-// e barrati quelli già completati. Ridisegnata a ogni serie.
+// Lista completa degli esercizi della scheda: evidenziato quello in corso,
+// barrati quelli completati, attenuati quelli saltati. Ridisegnata a ogni serie.
+// Gli esercizi ancora da fare (e quelli saltati) si toccano per farli subito.
 function renderExerciseList() {
     const ol = $('#p-exlist');
     if (!ol) return;
     ol.textContent = '';
 
     player.exercises.forEach((ex, i) => {
+        const done = setsDoneAt(i);
+        const planned = setsPlanned(ex);
+        const complete = done >= planned;
+        const current = i === player.exIndex;
+
         const li = document.createElement('li');
         li.className = 'exlist-item';
-        if (i === player.exIndex) li.classList.add('current');
-        else if (i < player.exIndex) li.classList.add('done');
+        if (current) li.classList.add('current');
+        else if (complete) li.classList.add('done');
+        else if (ex._skipped) li.classList.add('skipped');
+
+        // Toccabile = un <button> dentro la riga; altrimenti testo semplice.
+        let row = li;
+        if (!current && !complete) {
+            li.classList.add('pickable');
+            row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'exlist-pick';
+            row.addEventListener('click', () => pickExercise(i));
+            li.appendChild(row);
+        }
 
         const name = document.createElement('span');
         name.className = 'exlist-name';
         name.textContent = ex.name;             // textContent: niente XSS
-        li.appendChild(name);
+        row.appendChild(name);
 
-        if (ex.target) {
+        // Per un esercizio lasciato a metà si vede a che serie era arrivato.
+        const parts = [];
+        if (!current && done > 0 && !complete) parts.push(done + '/' + planned);
+        if (ex.target) parts.push(ex.target);
+        if (parts.length) {
             const t = document.createElement('span');
             t.className = 'exlist-target';
-            t.textContent = ex.target;
-            li.appendChild(t);
+            t.textContent = parts.join(' · ');
+            row.appendChild(t);
         }
 
         ol.appendChild(li);
     });
+}
+
+// --- Ordine libero degli esercizi -------------------------------------------
+// Dalla lista in fondo si può fare subito un esercizio qualsiasi; finito
+// quello, il player torna al primo ancora da fare.
+// "Fatto" non si salva a parte: si ricava da player.history, così
+// l'annulla serie lo corregge da solo.
+
+// Serie registrate in questa sessione per l'esercizio in posizione i.
+// Contano solo quelle dell'esercizio che occupa ora lo slot: dopo una
+// sostituzione l'alternativa riparte da zero.
+function setsDoneAt(i) {
+    const ex = player.exercises[i];
+    return player.history.filter((h) => h.exIndex === i && h.exerciseId === ex.id).length;
+}
+
+// Chiuso = tutte le serie previste registrate, oppure saltato.
+function isExerciseClosed(i) {
+    const ex = player.exercises[i];
+    return ex._skipped === true || setsDoneAt(i) >= setsPlanned(ex);
+}
+
+// Primo esercizio ancora da fare, dall'inizio della scheda. -1 se non ce n'è.
+function firstPendingExercise() {
+    return player.exercises.findIndex((ex, i) => !isExerciseClosed(i));
+}
+
+// Porta il player sull'esercizio i, dalla serie a cui era arrivato. Il peso
+// digitato resta legato al suo esercizio, così tornandoci lo si ritrova.
+function goToExercise(i) {
+    currentExercise()._lastWeight = player.lastWeight;
+    const ex = player.exercises[i];
+    player.exIndex = i;
+    player.setNumber = setsDoneAt(i) + 1;
+    player.lastWeight = ex._lastWeight !== undefined ? ex._lastWeight : null;
+    renderCurrentSet();
+}
+
+// Dopo un esercizio chiuso: il primo ancora da fare, oppure la fine.
+// Ritorna false se l'allenamento è finito.
+function advanceToPending() {
+    const next = firstPendingExercise();
+    if (next === -1) {
+        openFinish(true);
+        return false;
+    }
+    goToExercise(next);
+    return true;
+}
+
+// Tap su un esercizio della lista: lo si fa adesso. Uno saltato torna da fare.
+// Non scrive niente, quindi non serve il blocco anti doppio tap.
+function pickExercise(i) {
+    if (!player || i === player.exIndex) return;
+    tapBuzz();
+    player.exercises[i]._skipped = false;
+    goToExercise(i);
+    // In cima, dove ci sono i campi. Istantaneo: lo scroll animato si ferma se
+    // il dito è ancora appoggiato allo schermo.
+    window.scrollTo(0, 0);
 }
 
 // Tap su "Avanti": registra il set in locale, avanza subito, avvia il recupero.
@@ -1038,6 +1127,7 @@ function onNextSet() {
     player.history.push({
         client_uid: set.client_uid,
         exIndex: player.exIndex,
+        exerciseId: ex.id,
         setNumber: player.setNumber,
         weight: player.lastWeight,
     });
@@ -1047,25 +1137,18 @@ function onNextSet() {
     flushQueue();
 
     // Avanza lo stato e avvia il recupero.
-    const totalSets = setsPlanned(ex);
     const rest = parseInt(ex.rest_seconds, 10) || 0;
 
-    if (player.setNumber < totalSets) {
+    if (!isExerciseClosed(player.exIndex)) {
         player.setNumber += 1;
         renderCurrentSet();
         startRest(rest);
-    } else {
-        // Esercizio finito: passa al prossimo.
-        player.exIndex += 1;
-        player.setNumber = 1;
-        player.lastWeight = null;
-        if (player.exIndex >= player.exercises.length) {
-            openFinish(true); // era l'ultima serie dell'ultimo esercizio
-        } else {
-            renderCurrentSet();
-            startRest(rest);
-        }
+    } else if (advanceToPending()) {
+        // Esercizio finito: si passa al primo ancora da fare.
+        startRest(rest);
     }
+    // Altrimenti era l'ultimo esercizio da fare: advanceToPending ha già
+    // aperto la schermata di fine.
 }
 
 // Numero di serie previste per un esercizio: target + eventuali serie extra
@@ -1132,20 +1215,14 @@ function addExtraSet() {
     toast(tr('player.set_added'));
 }
 
-// "Salta esercizio": passa al prossimo senza registrare nulla per questo.
+// "Salta esercizio": lo chiude senza registrare altro e passa al primo ancora
+// da fare. Non viene riproposto, ma dalla lista si può sempre riprendere.
 function skipExercise() {
     tapBuzz();
     confirmTap($('#p-skip'), tr('player.skipped'));
 
-    player.exIndex += 1;
-    player.setNumber = 1;
-    player.lastWeight = null;
-    if (player.exIndex >= player.exercises.length) {
-        openFinish(true);
-    } else {
-        renderCurrentSet();
-        stopRest();
-    }
+    currentExercise()._skipped = true;
+    advanceToPending();       // ferma anche il recupero (renderCurrentSet)
 }
 
 // Riferimento "l'ultima volta": serie eseguite l'ultima sessione completata.
@@ -1364,7 +1441,7 @@ function applyAlternative(alt) {
     alt._substituted = true;
 
     player.exercises[player.exIndex] = alt;
-    player.setNumber = 1;
+    player.setNumber = setsDoneAt(player.exIndex) + 1;
     player.lastWeight = null;
 
     stopRest();

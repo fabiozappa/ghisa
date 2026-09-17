@@ -100,6 +100,7 @@ return [
     "player.finish"       => "Finish session",
     "player.cancel"       => "Discard session",
     "player.exlist_title" => "Exercises in this workout",
+    "player.exlist_hint"  => "Tap an exercise to do it now.",
     "player.set_logged"   => "✓ Set recorded",
     "player.set_added"    => "Set added",
     "player.skipped"      => "✓ Skipped",

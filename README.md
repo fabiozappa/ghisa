@@ -21,6 +21,8 @@ Filosofia KISS: nessuna email, nessun tracciamento, nessuna dipendenza esterna.
   ricorda le alternative già usate e te le ripropone; a fine allenamento decidi se quella
   sostituzione diventa definitiva.
 - **Esercizi a ripetizioni e a tempo**, con timer di recupero e timer di lavoro.
+- **Ordine libero.** Se una macchina è occupata puoi toccare un altro esercizio della lista
+  e farlo subito: finito quello, l'app ti riporta al primo ancora da fare.
 - **Gestione schede** completa: creazione, modifica, riordino, cestino a 30 giorni.
 - **Condivisione.** Attivandola ottieni un link pubblico di sola lettura; chi lo riceve può
   importare la scheda nel proprio account.

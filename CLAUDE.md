@@ -382,6 +382,21 @@ la ferma prima, e in entrambi i casi i secondi effettivi finiscono nel campo. La
 registra poi con "Avanti" come tutte le altre, quindi coda offline e idempotenza valgono
 identiche.
 
+**Ordine libero.** Toccando un esercizio nella lista in fondo al player lo si fa subito;
+finito quello, il player torna al **primo esercizio ancora da fare** dall'inizio della
+scheda. Regole:
+
+- Lo stato "fatto" **non si salva a parte**: `setsDoneAt()` lo ricava da `player.history`
+  (serie registrate in questa sessione, per posizione **e** `exercise_id`), così
+  l'annulla serie lo corregge da solo e un'alternativa riparte da zero.
+- Un esercizio lasciato a metà riprende dalla serie a cui era arrivato, col peso digitato
+  (`_lastWeight`): il `set_number` nei log continua, non ricomincia da 1.
+- "Salta esercizio" lo chiude (`_skipped`) e non viene riproposto, ma resta **toccabile**
+  nella lista: è il modo per rimediare a un salto sbagliato.
+- Completati ed esercizio in corso non sono toccabili. Il tocco non scrive dati, quindi
+  non ha il blocco anti doppio tap.
+- Tutto vive nel client: funziona offline e non tocca l'API.
+
 Ogni azione che **scrive dati** (Avanti, Salta esercizio) si blocca ~1,2s dopo il tap e
 mostra una conferma verde. Non è vezzo estetico: un doppio tap accidentale creerebbe una
 serie fantasma nello storico, e l'idempotenza su `client_uid` protegge dai reinvii di

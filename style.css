@@ -398,6 +398,28 @@ textarea:focus { outline: none; border-color: var(--accent); }
     outline: 2px solid var(--accent);
 }
 .exlist-item.done { opacity: 0.55; }
+.exlist-item.skipped { opacity: 0.55; }
+.exlist-hint { font-size: 0.8rem; color: var(--muted); margin: -4px 0 8px; }
+
+/* Esercizi toccabili: il bottone prende il posto del padding della riga, così
+   tutta la riga è l'area di tocco (minimo 48px). */
+.exlist-item.pickable { padding: 0; }
+.exlist-pick {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-height: var(--tap);
+    padding: 8px 10px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.exlist-pick:active { background: var(--surface); }
 .exlist-item.done .exlist-name { text-decoration: line-through; }
 .exlist-target { font-variant-numeric: tabular-nums; }
 .exlist-item.current .exlist-target { color: var(--accent); }
