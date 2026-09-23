@@ -5,13 +5,23 @@
 // Regola ferrea (CLAUDE.md punto 5): ogni query passa da prepared statement.
 // Gli helper esistono apposta perché scrivere SQL a mano resti sempre parametrico.
 
+// Configurazione di questo ambiente (config.php), letta una volta sola.
+function app_config(): array
+{
+    static $config = null;
+    if ($config === null) {
+        $config = require __DIR__ . '/config.php';
+    }
+    return $config;
+}
+
 // Ritorna la connessione PDO, creata una volta sola (singleton via static).
 function db(): PDO
 {
     static $pdo = null;
 
     if ($pdo === null) {
-        $config = require __DIR__ . '/config.php';
+        $config = app_config();
 
         $dsn = "mysql:host={$config['db_host']};dbname={$config['db_name']};charset=utf8mb4";
         $options = [

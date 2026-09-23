@@ -125,12 +125,16 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
             </label>
             <button type="submit" id="login-submit"><?= trh('login.submit') ?></button>
             <p id="login-error" class="error" role="alert" hidden></p>
+            <?php if (registration_enabled()): ?>
             <button type="button" id="show-register" class="link">
                 <?= trh('login.to_register') ?>
             </button>
+            <?php endif; ?>
         </form>
 
-        <!-- Registrazione: stessa forma del login, con in piu' la creazione. -->
+        <?php if (registration_enabled()): ?>
+        <!-- Registrazione: stessa forma del login, con in piu' la creazione.
+             Solo se l'autoregistrazione è aperta (allow_registration). -->
         <form id="register-form" autocomplete="off" hidden>
             <label>
                 <?= trh('login.username') ?>
@@ -158,6 +162,7 @@ $json_flags = JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS
                 <?= trh('reg.to_login') ?>
             </button>
         </form>
+        <?php endif; ?>
 
         <p class="lang-switch"><?= implode(' · ', $lang_links) ?></p>
 

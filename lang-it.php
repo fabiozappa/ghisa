@@ -233,6 +233,7 @@ return [
     "err.username_chars"           => "Il nome utente può contenere solo lettere, numeri, punto, trattino e underscore",
     "err.words_length"             => "Ognuna delle due parole deve avere almeno 3 caratteri",
     "err.username_taken"           => "Nome utente già in uso",
+    "err.registration_closed"      => "La registrazione di nuovi account è chiusa.",
     "err.too_many_attempts"        => "Troppi tentativi. Riprova fra qualche minuto.",
     "err.invalid_credentials"      => "Credenziali non valide",
     "err.words_mismatch"           => "Le due parole non corrispondono",

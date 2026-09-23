@@ -10,7 +10,8 @@ Istruzioni per lavorare su questo progetto. Leggi tutto prima di scrivere codice
 Filosofia KISS: nessuna email, nessun tracciamento, nessuna dipendenza esterna.
 
 **Stato: in uso reale. Multi-utente con registrazione libera.**
-Chiunque può creare un account dalla schermata di accesso. Ogni utente vede solo i propri
+Chiunque può creare un account dalla schermata di accesso, a meno che `config.php` non
+abbia `'allow_registration' => false` (vedi punto 6). Ogni utente vede solo i propri
 dati: tutte le action tranne `login` e `register` passano da `requireLogin()`, e ogni
 scrittura verifica la proprietà della riga prima di toccarla.
 
@@ -43,7 +44,7 @@ auth.php           sessione, login, logout, requireLogin()
 lang.php           lingua della richiesta (cookie → browser → italiano) + tr()
 lang-it.php        testi in italiano — lingua di riserva, ogni chiave deve esistere qui
 lang-en.php        testi in inglese
-config.php         credenziali DB — NON versionato (.gitignore), uno per ambiente
+config.php         credenziali DB + flag allow_registration — NON versionato (.gitignore)
 config-example.php modello da copiare in config.php
 README.md          installazione, aggiornamento e panoramica del progetto
 LICENSE            MIT — copre il codice, non il servizio ospitato
@@ -219,7 +220,7 @@ rimandare al login.
 
 | action | input | output |
 |---|---|---|
-| `register` | `username`, `word1`, `word2` | crea l'utente **e lo lascia loggato** (senza `requireLogin`) |
+| `register` | `username`, `word1`, `word2` | crea l'utente **e lo lascia loggato** (senza `requireLogin`). Rifiutata se l'autoregistrazione è chiusa |
 | `login` | `username`, `word1`, `word2` | utente + schede (vive e in cestino) |
 | `get_workout` | `workout_id` | **apre una sessione** e ritorna scheda, esercizi, ultimo peso e serie dell'ultima volta |
 | `log_set` | `client_uid`, `workout_log_id`, `exercise_id`, `set_number`, `weight_kg`, `reps_completed` | esito (idempotente) |
@@ -261,6 +262,13 @@ genererebbe un log fantasma a ogni apertura.
 
 Il **logout non è un'action**: è gestito da `index.php?logout=1`, perché la sessione è
 roba della shell, non un dato dell'app.
+
+**Autoregistrazione**: la decide `allow_registration` in `config.php`, letto da
+`app_config()` in `db.php`. **Se la chiave manca vale `true`**, di proposito: i `config.php`
+scritti prima del flag non devono chiudere le registrazioni da soli dopo un `git pull`.
+Il controllo vero è in `register_user()`, lato server; `index.php` nasconde solo link e
+form. Con la registrazione chiusa gli account non si possono creare in nessun altro modo
+(non esiste un pannello admin): si riapre il tempo necessario e si richiude.
 
 **Credenziali**: username + due parole in caselle separate. Lo username è normalizzato in
 minuscolo (`Fabio` e `fabio` sono lo stesso account) e la passphrase è le due parole unite

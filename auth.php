@@ -181,11 +181,26 @@ function verify_passphrase(int $user_id, string $word1, string $word2): bool
     return password_verify(normalize_passphrase($word1, $word2), (string) $hash);
 }
 
+// Autoregistrazione aperta? Flag 'allow_registration' in config.php.
+// Se manca vale true: è il comportamento di prima, così un config.php scritto
+// prima del flag non chiude le registrazioni all'insaputa di chi lo gestisce.
+function registration_enabled(): bool
+{
+    return (bool) (app_config()['allow_registration'] ?? true);
+}
+
 // Crea un utente e lo lascia loggato. Ritorna l'id, oppure il messaggio
-// d'errore in caso di problema (username già preso, credenziali non valide).
+// d'errore in caso di problema (username già preso, credenziali non valide,
+// registrazione chiusa).
 function register_user(string $username, string $word1, string $word2)
 {
     session_boot();
+
+    // Il controllo vero sta qui, non nel form: nascondere il form non basta,
+    // l'API resterebbe chiamabile a mano.
+    if (!registration_enabled()) {
+        return tr('err.registration_closed');
+    }
 
     $error = credentials_error($username, $word1, $word2);
     if ($error !== null) {

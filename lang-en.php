@@ -222,6 +222,7 @@ return [
     "err.username_chars"           => "The username can only contain letters, numbers, dot, hyphen and underscore",
     "err.words_length"             => "Each of the two words must be at least 3 characters long",
     "err.username_taken"           => "Username already taken",
+    "err.registration_closed"      => "Sign-up for new accounts is closed.",
     "err.too_many_attempts"        => "Too many attempts. Try again in a few minutes.",
     "err.invalid_credentials"      => "Invalid credentials",
     "err.words_mismatch"           => "The two words don't match",

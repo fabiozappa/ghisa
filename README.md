@@ -27,7 +27,7 @@ Filosofia KISS: nessuna email, nessun tracciamento, nessuna dipendenza esterna.
 - **Condivisione.** Attivandola ottieni un link pubblico di sola lettura; chi lo riceve può
   importare la scheda nel proprio account.
 - **PWA installabile**, con schermo sempre acceso durante l'allenamento.
-- **Multi-utente** con registrazione libera.
+- **Multi-utente**, con registrazione libera che si può chiudere da `config.php`.
 - **Italiano e inglese.** La lingua si prende dal browser e si cambia dalla schermata di
   accesso o da Account.
 
@@ -85,16 +85,26 @@ return [
     'db_name' => 'ghisa',
     'db_user' => 'utente',
     'db_pass' => 'password',
+
+    'allow_registration' => true,
 ];
 ```
 
 `config.php` **non è versionato** (`.gitignore`): ogni ambiente ha il suo, e le credenziali
 non finiscono mai nel repository.
 
+`allow_registration` decide se chiunque può crearsi un account. Con `false` il link
+"Registrati" sparisce e l'API rifiuta le registrazioni; chi ha già un account entra come
+sempre. Se la riga manca vale `true`.
+
 ### 5. Crea il primo utente
 
-Apri il sito e usa **"Non hai un account? Registrati"**. Non servono script: la
-registrazione è aperta e il primo account si crea dall'interfaccia.
+Apri il sito e usa **"Non hai un account? Registrati"**. Non servono script: il primo
+account si crea dall'interfaccia.
+
+Gli account nascono **solo** dalla registrazione. Se vuoi un'istanza chiusa, lascia
+`allow_registration` a `true` il tempo di creare gli account che servono, poi mettilo a
+`false`.
 
 Le credenziali sono **nome utente + due parole**. Non viene chiesta l'email, e quindi
 **non esiste un recupero password**: se le perdi, l'account non è più raggiungibile da
