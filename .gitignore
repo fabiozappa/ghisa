@@ -1,4 +1,5 @@
 /.nova/
+/.continue/
 /_test/
 /.DS_Store
 /config.php
